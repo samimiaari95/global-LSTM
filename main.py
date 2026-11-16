@@ -10,6 +10,9 @@ from LSTM_model.data.rawdataset import preprocess_rawdata
 from LSTM_model.data.obs_processing import obs_processing
 from LSTM_model.utils.plot_functions import plotting_helper
 from LSTM_model.utils.utils import utilities
+from LSTM_model.data.preprocess_era5land_observation_inputs import (
+    main as prepare_era5land_observation_inputs,
+)
 import LSTM_model.data.download_ERA5 as download_ERA5
 # from LSTM_model.data.metplotpy import MetplotpyEnsembleAnalysis
 #from LSTM_model.utils.volumetric_soilmoisture import calculate_soilmoisture
@@ -32,17 +35,16 @@ parser.add_argument('-c', '--calc', action='store_true', required=False, help='R
 
 parser.add_argument('-o', '--obs', action='store_true', required=False, help='Observations processing')
 
-# parser.add_argument('-a', '--ana', action='store_true', required=False, help='Ensemble analysis')
+parser.add_argument('--ERA5inputs', action='store_true', required=False, help='ERA5 inputs processing')
 
-# parser.add_argument('-m', '--metplotpy', action='store_true', required=False, help='METplotpy analysis')
 
 args = parser.parse_args()
-plt.rcParams.update({'font.size': 18})
+plt.rcParams.update({'font.size': 16})
 
 if args.dera:
     # download_ERA5.request_ERA5_t2m_d2m_swvl3()
     # download_ERA5.request_ERA5_tp()
-    # download_ERA5.extract_allzipfiles()
+    download_ERA5.extract_allzipfiles()
     pass
 
 if args.raw:
@@ -54,8 +56,12 @@ if args.prep:
     preprocessing = preprocessing_data()
     # call function here
     # preprocessing.conc_vars()
+    # preprocessing.repeat_wtd_timeseries()
     # preprocessing.ensemble_cropvars()
-    preprocessing.checkoutputs()
+    # preprocessing.mapping_localobs()
+    # preprocessing.prepare_input_target_arrays_in_hdf5()
+    # preprocessing.prepare_input_target_arrays_in_hdf5_saveonethespot()
+    preprocessing.setuphydrogen()
 
 if args.train:
     train_LSTM = train_LSTM_model()
@@ -63,18 +69,19 @@ if args.train:
 
 if args.eval:
     validate_LSTM = transfer_ensemble_LSTM()
-    batchind = args.batchind
+    validate_LSTM.transfer_ensemble()
+    # batchind = args.batchind
     # input_vars = {x: np.load(os.path.join(INPUTPATH, "validation_ERA5", f"target_pixels_{batchind}", x)) for x in FEATURES_FILES}
     # targetvar = np.load(os.path.join(INPUTPATH, "validation_ERA5", f"target_pixels_{batchind}", TARGETVAR_FILE))
     # for member in range(100):
         # validate_LSTM.transfer_ensemble(batchind=batchind, member=member, input_vars=input_vars, targetvar=targetvar)
-    try:
-        validate_LSTM.transfer_ensemble(batchind=batchind)
-    except:
-        # write the batchind and member that failed to a log file
-        with open(os.path.join(OUTPUTPATH, "validation_ERA5", "ensemble_400px", f"failed_batches_{member}.log"), 'a') as f:
-            f.write(f"{batchind}\n")
-        f.close()
+    # try:
+    #     validate_LSTM.transfer_ensemble(batchind=batchind)
+    # except:
+    #     # write the batchind and member that failed to a log file
+    #     with open(os.path.join(OUTPUTPATH, "validation_ERA5", "ensemble_400px", f"failed_batches_{member}.log"), 'a') as f:
+    #         f.write(f"{batchind}\n")
+    #     f.close()
 
 if args.calc:
     postprocess = postprocess_calculations()
@@ -89,7 +96,8 @@ if args.calc:
     # postprocess.crps_seasonal_transferEU()
     # postprocess.boxplot_seasonal_crps()
     # postprocess.ensemble_statvsacc()
-    postprocess.ensemble_statvsacc_fitting()
+    # postprocess.ensemble_statvsacc_fitting()
+
     # postprocess.crps_transferEU()
     # postprocess.ensemble_crpsvsstats()
     # postprocess.ensemble_crpsvsstats_fitting()
@@ -105,20 +113,18 @@ if args.calc:
     # postprocess.plot_cdfs()
     # TODO plot y=x
     # postprocess.location_of_localobs()
-    # postprocess.postprocess_era5wtd_vs_obs()
+    postprocess.postprocess_era5wtd_vs_obs()
+    # postprocess.morans_I()
 
 if args.obs:
     obs_proc = obs_processing()
     # call function here
-    obs_proc.read_csv_monthlyobs_from_yueling()
-    obs_proc.maptoTSMP_averageduplicates()
+    # obs_proc.read_csv_monthlyobs_from_yueling()
+    # obs_proc.maptoTSMP_averageduplicates()
+    # obs_proc.tsmpindicesofallobs()
+    # obs_proc.additional_obs()
+    # obs_proc.obs_lonlat_area()
+    outputs = obs_proc.find_longest_monthly_anomaly_period()
 
-# if args.ana:
-#     ensemble_ana = ensemble_analysis()
-#     # call function here
-#     ensemble_ana.run_analysis()
-
-# if args.metplotpy:
-#     metplotpy = MetplotpyEnsembleAnalysis()
-#     # call function here
-#     metplotpy.runmetplotpy_full()
+if args.ERA5inputs:
+    prepare_era5land_observation_inputs()
