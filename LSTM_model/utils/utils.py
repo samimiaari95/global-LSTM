@@ -357,38 +357,25 @@ class utilities:
         #plt.savefig("sm1mcum.png")
         return all_inputs, means_stds
 
-    def transferpx_inputfeatures_testsinglepixel(self, start, end, means_stds):
-        all_inputs = np.array([])
-        for inputvar in FEATURES_FILES:
-            print(inputvar)
-            raw_data = np.load(os.path.join(INPUTPATH, "validation_ERA5", f"testingAImember0singlepixel", inputvar))
-            print(f"raw_data shape: {raw_data.shape}")
-            # raw_data = raw_data.reshape(raw_data.shape[0], NB_CELLS) if len(raw_data.shape)>2 else raw_data
-            data = raw_data[start:end]
-            # data = np.moveaxis(data, 0, -1) # (cells, timeseries)
-            if f"{inputvar.replace('.npy','')}mean" not in means_stds.keys() and f"{inputvar.replace('.npy','')}std" not in means_stds.keys():
-                means_stds[f"{inputvar.replace('.npy','')}mean"] = np.mean(data)
-                means_stds[f"{inputvar.replace('.npy','')}std"] = np.std(data)
+    def transferpx_inputfeatures_testsinglepixel(
+        self, start, end, feature_means, feature_stds
+    ):
+        """Build single-pixel lookback windows using the member's training scalers."""
+        input_dir = os.path.join(
+            INPUTPATH, "validation_ERA5", "testingAImember0singlepixel"
+        )
+        features = np.empty((end - start, len(FEATURES_FILES)), dtype=np.float32)
+        for index, filename in enumerate(FEATURES_FILES):
+            data = np.load(os.path.join(input_dir, filename))[start:end]
+            features[:, index] = data
 
-            data = (data - means_stds[f"{inputvar.replace('.npy','')}mean"])/means_stds[f"{inputvar.replace('.npy','')}std"]
+        np.nan_to_num(features, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+        features -= feature_means
+        features /= feature_stds
 
-            lookback_arrays = [data[i-LOOKBACK:i] for i in range(LOOKBACK, end-start)]
-            lookback_arrays = np.array(lookback_arrays)
-
-            f1 = lookback_arrays.reshape(-1, LOOKBACK)
-            f1 = np.array([f1])
-            all_inputs = np.concatenate((all_inputs,f1), axis=0) if len(all_inputs)>0 else f1
-
-        all_inputs = np.moveaxis(all_inputs, 0, -1)
-        print(f"all_inputs shape: {all_inputs.shape}")
-        f1 = None
-        lookback_arrays = None
-        data = None
-        raw_data = None
-        #timeseries = [i for i in range(10, 365*4*100, 100)]
-        #plt.plot(all_inputs[timeseries,-1,2])
-        #plt.savefig("sm1mcum.png")
-        return all_inputs, means_stds
+        windows = np.lib.stride_tricks.sliding_window_view(features, LOOKBACK, axis=0)
+        # Each target uses the preceding LOOKBACK days.
+        return np.moveaxis(windows[:-1], -1, 1).copy()
 
     def plot_cdfs(self,
         data_dict: Dict[str, Union[list, np.ndarray]],
