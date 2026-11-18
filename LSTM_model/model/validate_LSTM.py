@@ -67,17 +67,19 @@ class transfer_ensemble_LSTM:
         )
 
         ################# Testing ######################
-        # obs_stand_input, means_stds = utils.transferpx_targetvar(0, TEST_PERIOD-LOOKBACK, means_stds, batchind)
+        utils = utilities()
+        obs_stand_input, means_stds = utils.transferpx_targetvar_testsinglepixel(0, TEST_PERIOD-LOOKBACK, means_stds)
         # usually starting from LOOKBACK to TEST_PERIOD, but here we start from 0 to TEST_PERIOD since we don't provide wtd of TSMP for 1999, 
         # we don't need it because we will later compare to observations not TSMP
-        # features_stand_inputs, means_stds = utils.transferpx_inputfeatures(0, TEST_PERIOD, means_stds, batchind)
+        features_stand_inputs, means_stds = utils.transferpx_inputfeatures_testsinglepixel(0, TEST_PERIOD, means_stds)
 
         print("preparing dataloader")
-        # print(f"inputs shape: {features_stand_inputs.shape}")
-        # print(f"obs shape: {obs_stand_input.shape}")
-        datasetpath = os.path.join("/p/scratch/cesmtst/miaari1/inputhdf5_files", f"standardized3dinput1dtarget_{member}.h5")
-        test_dataset = MyDataset(datasetpath)
+        print(f"inputs shape: {features_stand_inputs.shape}")
+        print(f"obs shape: {obs_stand_input.shape}")
+        # datasetpath = os.path.join("/p/scratch/cesmtst/miaari1/inputhdf5_files", f"standardized3dinput1dtarget_{member}.h5")
+        # test_dataset = MyDataset(datasetpath)
         # test_dataset = TensorDataset(torch.tensor(features_stand_inputs).float().to(device), torch.tensor(obs_stand_input).float().to(device))
+        test_dataset = TensorDataset(torch.tensor(features_stand_inputs).float(), torch.tensor(obs_stand_input).float())
         #test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset, shuffle=False, seed=0,)
         test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)#sampler=test_sampler) # no random shuffling for the test
 
@@ -89,7 +91,9 @@ class transfer_ensemble_LSTM:
         test_o = []
         with torch.no_grad():
             for inputs, y in test_dataloader:
-                inputs = inputs.to(device)
+                inputs = inputs.to(device, non_blocking=True)
+                # Move y too if you use it in GPU calculations:
+                # y = y.to(device, non_blocking=True)
                 #y = y.to(device)
                 y_hat = lstm_model(inputs)
                 test_s.append(y_hat.flatten())
@@ -114,7 +118,7 @@ class transfer_ensemble_LSTM:
         # print(f"obs destand shape: {obs_destand.shape}")
         print(f"sim destand shape: {sim_destand.shape}")
         # np.save(os.path.join(OUTPUTPATH, "validation_ERA5", "ensemble_400px", f"400px_member_{member}", f"obs_localobspixels.npy"), obs_destand)
-        np.save(os.path.join(OUTPUTPATH, "validation_ERA5", "ensemble_400px", f"400px_member_{member}", f"sim_ERA5onlocalobspixels.npy"), sim_destand)
+        np.save(os.path.join(OUTPUTPATH, "validation_ERA5", "ensemble_400px", f"400px_member_{member}", f"sim_ERA5onsingleobspixel.npy"), sim_destand)
         torch.distributed.destroy_process_group()
         print(f"time: {datetime.datetime.now().time()}")
         return print("saved destandardized arrays")
