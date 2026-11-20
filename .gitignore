@@ -3,11 +3,16 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# agent settings folders
+.github/
+.vscode/
+
 # C extensions
 *.so
 
 # directories
 inputs/
+outputs/EU_74_-48_69_20/validation_ERA5/ensemble_400px/400px_member_*
 outputs/
 
 # Distribution / packaging
@@ -134,3 +139,4 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+.DS_Store
