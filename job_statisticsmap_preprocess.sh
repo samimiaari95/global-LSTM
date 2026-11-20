@@ -1,30 +1,30 @@
 #!/bin/bash -x
-# author: Sami Miaari
-# e-mail: s.miaari@fz-juelich.de
+# author: xxxx
+# e-mail: xxxxx
 
 #SBATCH --job-name=statsmap_preprocess
-#SBATCH --account=xxxxx
+#SBATCH --account=xxxx
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --partition=batch
+#SBATCH --partition=xxxx
 #SBATCH --time=03:00:00
-#SBATCH --output=/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/outputs/EU_74_-48_69_20/statisticsEUmap/logs/preprocess_%j.out
-#SBATCH --error=/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/outputs/EU_74_-48_69_20/statisticsEUmap/logs/preprocess_%j.err
-#SBATCH --mail-user=s.miaari@fz-juelich.de
+#SBATCH --output=preprocess_%j.out
+#SBATCH --error=preprocess_%j.err
+#SBATCH --mail-user=xxxxx
 #SBATCH --mail-type=ALL
 
 set -euo pipefail
 
-cd /p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM
-source /p/project1/cslts/miaari1/python_scripts/DailyScriptBox/envs/loadenv.JURECA-DCadapted_JUWELS_2025_GCC-OpenMPI_Std-Py-AI.ini
+cd xxxx
+source xxxx
 module load netcdf4-python
 
 export CUDA_VISIBLE_DEVICES=""
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-32}"
 export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-32}"
 
-STATISTICS_ROOT=/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/outputs/EU_74_-48_69_20/statisticsEUmap
+STATISTICS_ROOT=xxxxx
 if [[ -z "${RUN_NAME:-}" ]]; then
     RUN_NAME="run_preprocess_${SLURM_JOB_ID:-manual}_$(date +%Y%m%d_%H%M%S)"
     RUN_DIR="${STATISTICS_ROOT}/${RUN_NAME}"
@@ -46,8 +46,8 @@ fi
 
 echo "Starting CPU preprocessing for ${RUN_NAME}"
 srun python -u -m LSTM_model.data.prepare_era5land_statisticsmap \
-  --mask-path /p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/inputs/EU_74_-48_69_20/mapping_0stdroll6months.npy \
-  --era5-dir /p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/inputs/EU_74_-48_69_20/raw/ERA5-Land \
-  --input-dir /p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/inputs/EU_74_-48_69_20 \
-  --output-root /p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/outputs/EU_74_-48_69_20/statisticsEUmap \
+  --mask-path xxxx \
+  --era5-dir xxxx \
+  --input-dir xxxx \
+  --output-root xxxx \
   --run-name "$RUN_NAME"

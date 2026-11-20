@@ -1,11 +1,11 @@
 #!/bin/bash
 
-cd /p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM
-source /p/project1/cslts/miaari1/python_scripts/DailyScriptBox/envs/loadenv.JURECA-DC_JUWELS_2025_GCC-OpenMPI_Std-Py-AI.ini
+cd xxxx
+source xxxx
 
 # Directory containing the NetCDF files
-INPUT_DIR="/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/inputs/EU_74_-48_69_20/raw/ERA5-Land"
-GRID_FILE="/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/inputs/EU_74_-48_69_20/raw/ERA5-Land/regridded_to_EUR11/grids_and_weights/EUR11_TSMP_grid.txt"
+INPUT_DIR="xxxx"
+GRID_FILE="xxxx"
 
 # Loop over all .nc files in the directory
 for file in "$INPUT_DIR"/daily_mean_d2m_t2m_swvl3/*.nc; do

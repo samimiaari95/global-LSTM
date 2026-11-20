@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-REPOSITORY=/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM
+REPOSITORY=xxxxx
 STATISTICS_ROOT="${REPOSITORY}/outputs/EU_74_-48_69_20/statisticsEUmap"
 
 if [[ "$#" -ne 1 ]]; then

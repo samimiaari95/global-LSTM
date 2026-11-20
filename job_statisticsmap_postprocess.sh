@@ -1,30 +1,30 @@
 #!/bin/bash -x
-# author: Sami Miaari
-# e-mail: s.miaari@fz-juelich.de
+# author: xxxxx
+# e-mail: xxxxx
 
 #SBATCH --job-name=statsmap_postprocess
 #SBATCH --account=xxxx
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --partition=batch
+#SBATCH --partition=xxxx
 #SBATCH --time=18:00:00
-#SBATCH --output=/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/outputs/EU_74_-48_69_20/statisticsEUmap/logs/postprocess_%j.out
-#SBATCH --error=/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/outputs/EU_74_-48_69_20/statisticsEUmap/logs/postprocess_%j.err
-#SBATCH --mail-user=s.miaari@fz-juelich.de
+#SBATCH --output=postprocess_%j.out
+#SBATCH --error=postprocess_%j.err
+#SBATCH --mail-user=xxxxx
 #SBATCH --mail-type=ALL
 
 set -euo pipefail
 
-cd /p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM
-source /p/project1/cslts/miaari1/python_scripts/DailyScriptBox/envs/loadenv.JURECA-DCadapted_JUWELS_2025_GCC-OpenMPI_Std-Py-AI.ini
+cd xxxx
+source xxxx
 module load netcdf4-python
 
 export CUDA_VISIBLE_DEVICES=""
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-16}"
 export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-16}"
 
-STATISTICS_ROOT=/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/outputs/EU_74_-48_69_20/statisticsEUmap
+STATISTICS_ROOT=xxxxx
 if [[ "$#" -gt 1 ]]; then
     echo "Usage: sbatch $0 [run_name]" >&2
     exit 2

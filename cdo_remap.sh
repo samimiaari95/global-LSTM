@@ -1,16 +1,16 @@
 #!/bin/bash
 
 
-cd /p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM
-source /p/project1/cslts/miaari1/python_scripts/DailyScriptBox/envs/loadenv.JURECA-DC_JUWELS_2025_GCC-OpenMPI_Std-Py-AI.ini
+cd xxxx
+source xxxxx
 
 # Directory containing the NetCDF files
-INPUT_DIR="/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/inputs/EU_74_-48_69_20/raw/ERA5-Land"
-GRID_FILE="/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/inputs/EU_74_-48_69_20/raw/ERA5-Land/regridded_to_EUR11/grids_and_weights/EUR11_TSMP_grid.txt"
-WEIGHTS_NN="/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/inputs/EU_74_-48_69_20/raw/ERA5-Land/regridded_to_EUR11/grids_and_weights/ERA5land_t2m_202012.nc.EUR11.weights_nn.nc"
+INPUT_DIR="xxxxx"
+GRID_FILE="xxxxx"
+WEIGHTS_NN="xxxxx"
 
 # Loop over all .nc files in the directory
-for file in "$INPUT_DIR/daily_mean_d2m_t2m_swvl3"/*.nc; do
+for file in "$INPUT_DIR"/*.nc; do
     filename=$(basename "$file")
     
     # Check if the filename contains t2m, d2m, or swvl3

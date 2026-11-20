@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Directory containing the NetCDF files
-INPUT_DIR="/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/inputs/EU_74_-48_69_20/raw/ERA5-Land"
+INPUT_DIR="xxxxxx"
 OUTPUT_DIR="${INPUT_DIR}/daily_23h"
 mkdir -p "$OUTPUT_DIR"
 

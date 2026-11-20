@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Directory containing NetCDF files
-DIR="/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/inputs/EU_74_-48_69_20/raw/ERA5-Land"
+DIR="xxxxx"
 
 # List of variables to extract
 VARS=("t2m" "d2m" "swvl3")
@@ -16,7 +16,8 @@ for file in "$DIR"/*.nc; do
     [[ -f "$file" ]] || continue
 
     base=$(basename "$file" .nc)
-    cdo daymean "$file" "${DIR}/${base}_daily_mean.nc"
+    base="${base/_daily_mean/}"
+    # cdo daymean "$file" "${DIR}/${base}_daily_mean.nc"
     for var in "${VARS[@]}"; do
         echo "  Extracting variable: $var"
         newbase="${base/t2m_d2m_swvl3/$var}"
