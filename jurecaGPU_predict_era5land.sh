@@ -1,24 +1,24 @@
 #!/bin/bash -x
-# author: Sami Miaari
-# e-mail: s.miaari@fz-juelich.de
+# author: xxxxxx
+# e-mail: xxxxxx
 
 #SBATCH --job-name=era5wtdobspixels
-#SBATCH --account=jicg41
+#SBATCH --account=xxxxx
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
-#SBATCH --output=/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/outputs/EU_74_-48_69_20/validation_ERA5/obspixelsera5wtdlogs/era5land-wtd-out.%j
-#SBATCH --error=/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/outputs/EU_74_-48_69_20/validation_ERA5/obspixelsera5wtdlogs/era5land-wtd-err.%j
+#SBATCH --output=era5land-wtd-out.%j
+#SBATCH --error=era5land-wtd-err.%j
 #SBATCH --gres=gpu:4
-#SBATCH --partition=dc-gpu
-#SBATCH --time=03:00:00
-#SBATCH --mail-user=s.miaari@fz-juelich.de
+#SBATCH --partition=xxxxx
+#SBATCH --time=05:00:00
+#SBATCH --mail-user=xxxxxx
 #SBATCH --mail-type=ALL
 
 set -euo pipefail
 
-cd /p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM
-source /p/project1/cslts/miaari1/python_scripts/DailyScriptBox/envs/loadenv.JURECA-DCadapted_JUWELS_2025_GCC-OpenMPI_Std-Py-AI.ini
+cd xxxxx
+source xxxxxx
 
 if [[ $# -ne 0 ]]; then
     echo "Usage: sbatch $0" >&2
