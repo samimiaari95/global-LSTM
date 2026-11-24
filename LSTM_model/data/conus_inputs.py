@@ -14,7 +14,7 @@ import pandas as pd
 import xarray as xr
 
 from LSTM_model.data.conus_observations import (
-    CONUS2_RUN, ERA5LAND_RUN, connect_hydrodata, read_sites, save_csv, save_json,
+    MONTHLY_GRID, MONTHLY_INPUTS, connect_hydrodata, read_sites, save_csv, save_json,
 )
 from LSTM_model.model.config import FEATURES_FILES, LOOKBACK
 
@@ -64,43 +64,7 @@ def download_conus2_field(hf, folder, variable):
     temporary.replace(path)
 
 
-def conus2_well_locations(root, folder):
-    stations = read_sites(root / "selected_stations.csv")
-    height, width = CONUS2_SHAPE
-    x, y = stations.conus2_i, stations.conus2_j
-    inside = x.between(0, width - 1) & y.between(0, height - 1) & (x == x.round()) & (y == y.round())
-    excluded = stations.loc[~inside].assign(exclusion_reason="missing or invalid CONUS2 grid index")
-    matched = stations.loc[inside].assign(x=x[inside].astype(int), y=y[inside].astype(int))
-    rows, cols = matched.y.to_numpy(), matched.x.to_numpy()
-    fields = {}
-    for variable in (*STATIC_VARIABLES, "mask"):
-        raw = np.load(folder / f"{variable}.npy", mmap_mode="r", allow_pickle=False)
-        fields[variable] = (raw[-1] if variable == "pf_indicator" else raw)[rows, cols]
-    sample = pd.DataFrame(fields, index=matched.index)
-    located = ((matched.latitude - sample.latitude).abs().le(.025)
-               & (matched.longitude - sample.longitude).abs().le(.025))
-    usable = (sample["mask"].gt(0) & sample.slope_x.between(-10, 10)
-              & sample.slope_y.between(-10, 10) & sample.pf_indicator.gt(0)
-              & np.isfinite(sample).all(axis=1))
-    valid = located & usable
-    rejected = matched.loc[~valid].assign(exclusion_reason=np.where(
-        ~located[~valid], "CONUS2 cell coordinates differ from station coordinates",
-        "inactive cell or invalid source static field"))
-    save_csv(pd.concat([excluded, rejected]), root / "excluded_static_stations.csv")
-    if not valid.any():
-        raise ValueError("No wells passed CONUS2 static checks")
-    stations_with_static = matched.loc[valid].join(
-        sample.loc[valid].rename(columns={"latitude": "grid_latitude", "longitude": "grid_longitude"}))
-    save_csv(stations_with_static, root / "stations_with_static.csv")
-    pixels = matched.loc[valid, ["y", "x"]].join(sample.loc[valid]).drop_duplicates(
-        ["y", "x"]).sort_values(["y", "x"])
-    save_csv(pixels, root / "static_pixels.csv", index=False)
-    print(f"CONUS2 retained {valid.sum()}/{len(stations)} wells at {len(pixels)} cells", flush=True)
-
-
 def fetch_conus2_static(root):
-    if not (root / "selected_stations.csv").is_file():
-        raise FileNotFoundError(f"Missing selected wells in {root}")
     folder = root / "static" / "conus2"
     folder.mkdir(parents=True, exist_ok=True)
     variables = (*STATIC_VARIABLES, "mask")
@@ -113,7 +77,7 @@ def fetch_conus2_static(root):
         "shape_yx": list(CONUS2_SHAPE), "pf_indicator_layers": "10, bottom to top",
         "variables": list(variables),
     }, folder / "metadata.json")
-    conus2_well_locations(root, folder)
+    print(f"CONUS2 static snapshot ready in {folder}", flush=True)
 
 
 def no_leap_dates(start, end):
@@ -462,13 +426,13 @@ def main():
                         help="ERA5-Land data source used by the prepare stage")
     args = parser.parse_args()
     if args.stage == "static-conus2":
-        fetch_conus2_static(args.root or CONUS2_RUN)
+        fetch_conus2_static(args.root or MONTHLY_INPUTS)
     elif args.stage == "download-era5":
-        fetch_era5(args.root or ERA5LAND_RUN)
+        fetch_era5(args.root or MONTHLY_GRID)
     elif args.stage == "prepare":
-        prepare(args.root or ERA5LAND_RUN, args.forcing_source)
+        prepare(args.root or MONTHLY_GRID, args.forcing_source)
     else:
-        preflight(args.root or ERA5LAND_RUN)
+        preflight(args.root or MONTHLY_GRID)
 
 
 if __name__ == "__main__":

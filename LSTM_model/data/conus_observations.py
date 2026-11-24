@@ -13,8 +13,10 @@ import pandas as pd
 
 
 ROOT = Path("inputs/CONUS")
-CONUS2_RUN = ROOT / "monthly_anomaly_run"
-ERA5LAND_RUN = CONUS2_RUN / "era5land_grid"
+MONTHLY_INPUTS = Path("inputs/CONUSmonthly")
+MONTHLY_GRID = MONTHLY_INPUTS / "era5land_grid"
+MONTHLY_START = "2020-01-01"
+MONTHLY_END = "2024-12-31"
 FREQUENCIES = {"daily": "D", "weekly": "W-SUN", "monthly": "M"}
 STATES = set("AL AZ AR CA CO CT DE DC FL GA ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT "
              "NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split())
@@ -117,7 +119,7 @@ def download_cadence(client, cadence, folder):
               folder / "complete.json")
 
 
-def load_observations(folder, cadence, site_ids):
+def load_observations(folder, cadence, site_ids, days=None):
     blocks = []
     for path in sorted(folder.glob("sites_*.csv.gz")):
         frame = pd.read_csv(
@@ -130,7 +132,7 @@ def load_observations(folder, cadence, site_ids):
         if not periods.is_unique or periods.hasnans:
             raise ValueError(f"Invalid or repeated {cadence} dates in {path}")
         frame.index = periods
-        blocks.append(frame)
+        blocks.append(frame if days is None else frame.reindex(days))
     if not blocks:
         return pd.DataFrame()
     data = pd.concat(blocks, axis=1, verify_integrity=True).sort_index()
@@ -139,89 +141,33 @@ def load_observations(folder, cadence, site_ids):
         pd.period_range(periods.min(), periods.max(), freq=periods.freq))
 
 
-def best_window(data, minimum_start="1951-01-01", latest_end=None):
-    """Maximize stations with a defined calendar-month z-score throughout."""
-    if data.empty:
-        return None
-    periods = data.index
-    eligible = periods.start_time >= pd.Timestamp(minimum_start)
-    if latest_end is not None:
-        eligible &= periods.end_time.normalize() <= pd.Timestamp(latest_end)
-    periods = periods[eligible]
-    values = data.loc[eligible].to_numpy()
-    month_count, station_count = values.shape
-    if month_count < 24:
-        return None
-
-    # For each station and start, a missing month caps the possible window.
-    # A different value in the same calendar month makes its z-score defined.
-    next_gap = np.full((month_count + 1, station_count), month_count, dtype=np.int32)
-    next_change = np.full(values.shape, month_count, dtype=np.int32)
-    for i in range(month_count - 1, -1, -1):
-        next_gap[i] = np.where(np.isfinite(values[i]), next_gap[i + 1], i)
-        if i + 12 < month_count:
-            next_change[i] = np.where(values[i] != values[i + 12], i + 12, next_change[i + 12])
-
-    best = None
-    for start in range(month_count - 23):
-        first_end = np.maximum(start + 23, next_change[start:start + 12].max(axis=0))
-        stop = next_gap[start]
-        valid = first_end < stop
-        if not valid.any():
-            continue
-        added = np.bincount(first_end[valid], minlength=month_count + 1)
-        removed = np.bincount(stop[valid], minlength=month_count + 1)
-        counts = np.cumsum(added - removed)[:month_count]
-        end = month_count - 1 - counts[::-1].argmax()
-        score = (int(counts[end]), end - start + 1, -start)
-        if best is None or score > best[0]:
-            best = score, periods[start], periods[end]
-    return best
-
-
-def eligible_observations(folder, cadence):
-    sites = read_sites(folder / "sites.csv")
-    sites = sites.loc[sites.state.isin(STATES)]
-    return sites, load_observations(folder, cadence, set(sites.index))
-
-
-def selection_data(cache):
-    monthly = cache / "monthly"
-    marker = monthly / "complete.json"
-    if marker.is_file() and json.loads(marker.read_text()).get("source", "native") == "native":
-        sites, data = eligible_observations(monthly, "monthly")
-        return sites, data, "native"
-    daily = cache / "daily"
+def select(root, archive):
+    # Keep the daily NWIS archive as the source used to optimize this window.
+    daily = archive / "daily"
     if not (daily / "complete.json").is_file():
         raise FileNotFoundError(f"Daily observation download is incomplete in {daily}")
-    sites, data = eligible_observations(daily, "daily")
-    if not data.empty:
-        data = data.groupby(data.index.asfreq("M")).mean()
-    return sites, data, "daily_aggregation"
-
-
-def select(root, latest_end, archive=None):
-    sites, data, source = selection_data(archive or root / "observations")
-    result = best_window(data, latest_end=latest_end)
-    if result is None:
-        raise ValueError("No window of at least 24 months with complete monthly anomalies")
-    score, first, last = result
-    winner = {
-        "cadence": "monthly", "source": source, "domain": "conus", "station_count": score[0],
-        "months": int(score[1]), "days": (last.end_time.date() - first.start_time.date()).days + 1,
-        "start": str(first.start_time.date()), "end": str(last.end_time.date()),
-        "latest_end_cutoff": latest_end,
-        "criterion": "gap-free monthly observations with nonzero variance in every calendar month",
-    }
-    data = data.loc[first:last].dropna(axis=1)
+    sites = read_sites(daily / "sites.csv")
+    sites = sites.loc[sites.state.isin(STATES)]
+    days = pd.period_range(MONTHLY_START, MONTHLY_END, freq="D")
+    months = days.asfreq("M").unique()
+    samples = load_observations(daily, "daily", set(sites.index), days=days)
+    if samples.empty:
+        raise ValueError(f"No daily observation batches in {daily}")
+    data = samples.groupby(samples.index.asfreq("M")).mean().reindex(months).dropna(axis=1)
     by_month = data.groupby(data.index.month)
     varying = (by_month.max() > by_month.min()).all(axis=0)
     data = data.loc[:, varying].sort_index(axis=1)
-    if data.shape[1] != winner["station_count"]:
-        raise ValueError("Selected station count differs from window search")
+    if data.empty:
+        raise ValueError("No wells have complete, varying monthly observations for the study window")
+    winner = {
+        "cadence": "monthly", "source": "daily_aggregation", "domain": "conus",
+        "station_count": data.shape[1], "months": len(months), "days": len(days),
+        "start": MONTHLY_START, "end": MONTHLY_END, "minimum_months": 60,
+        "optimization": "Maximize native ERA5-Land cells with continuous monthly anomalies",
+        "criterion": "Use wells with finite monthly means and variation in each calendar month",
+    }
     selected_sites = sites.loc[data.columns].rename_axis("site_id")
     root.mkdir(parents=True, exist_ok=True)
-    save_csv(pd.DataFrame([winner]), root / "candidate_windows.csv", index=False)
     data.index = data.index.start_time.rename("date")
     save_csv(data, root / "selected_wtd.csv")
     save_csv(selected_sites, root / "selected_stations.csv")
@@ -234,16 +180,11 @@ def main():
     parser.add_argument("stage", choices=["download", "select"])
     parser.add_argument("--root", type=Path)
     parser.add_argument("--archive", type=Path, help="Existing observation archive for selection")
-    parser.add_argument(
-        "--latest-end", help="Last date with complete ERA5-Land coverage (default: six UTC days ago)")
     args = parser.parse_args()
     if args.stage == "download":
         download(args.root or ROOT)
     else:
-        latest_end = args.latest_end or str(
-            (pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=6)).date())
-        archive = args.archive or (ROOT / "observations" if args.root is None else None)
-        select(args.root or CONUS2_RUN, latest_end, archive)
+        select(args.root or MONTHLY_INPUTS, args.archive or ROOT / "observations")
 
 
 if __name__ == "__main__":

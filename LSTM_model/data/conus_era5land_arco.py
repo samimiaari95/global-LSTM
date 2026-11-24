@@ -12,7 +12,7 @@ import pandas as pd
 from xarray.coding.times import decode_cf_datetime
 
 from LSTM_model.data.conus_inputs import forcing_area, stage_calendar
-from LSTM_model.data.conus_observations import ERA5LAND_RUN, save_json
+from LSTM_model.data.conus_observations import MONTHLY_GRID, save_json
 
 
 ARCO = "https://arco.datastores.ecmwf.int"
@@ -155,7 +155,7 @@ def download(root, workers, keep_leap_days=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", default=ERA5LAND_RUN, type=Path)
+    parser.add_argument("--root", default=MONTHLY_GRID, type=Path)
     parser.add_argument("--workers", type=int, default=12)
     parser.add_argument("--keep-leap-days", action="store_true",
                         help="Keep every calendar date through the selected end, including February 29")

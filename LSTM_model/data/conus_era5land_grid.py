@@ -12,7 +12,7 @@ from pyproj import Proj
 
 from LSTM_model.data.conus_era5land_arco import GROUPS, arco_headers, grid_indices, open_arco_group
 from LSTM_model.data.conus_inputs import CONUS2_SHAPE
-from LSTM_model.data.conus_observations import CONUS2_RUN, connect_hydrodata, read_sites, save_csv, save_json
+from LSTM_model.data.conus_observations import MONTHLY_INPUTS, connect_hydrodata, read_sites, save_csv, save_json
 from LSTM_model.model.config import get_root_dir
 
 
@@ -225,7 +225,7 @@ def build_grid(root, output, tcl):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("stage", choices=["download-soil", "grid"])
-    parser.add_argument("--root", type=Path, default=CONUS2_RUN)
+    parser.add_argument("--root", type=Path, default=MONTHLY_INPUTS)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--soil-tcl", type=Path, default=TCL)
     args = parser.parse_args()
