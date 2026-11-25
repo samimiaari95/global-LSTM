@@ -12,7 +12,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
-from matplotlib.colors import Normalize
+from matplotlib.colors import LogNorm, Normalize
 import numpy as np
 import pandas as pd
 import shapefile
@@ -96,6 +96,17 @@ def prediction_r2(observed, predicted):
     return 1 - np.sum((predicted - observed)**2) / np.sum((observed - observed.mean())**2)
 
 
+def ensemble_statistics(block):
+    """Summarize the spread and agreement of member series (member, time)."""
+    q25, q75 = np.percentile(block, [25, 75], axis=0)
+    stats = dict(Ensemble_variance=block.var(axis=0).mean(), IQR=(q75-q25).mean(),
+                 Ensemble_SD=block.std(axis=0).mean(), MAD=np.abs(block-block.mean(axis=0)).mean())
+    if block.shape[1] >= 2 and np.all(np.ptp(block, axis=1) > 0):
+        corr = np.corrcoef(block)
+        stats["Pairwise_r"] = corr[np.triu_indices(len(block), k=1)].mean()
+    return stats
+
+
 def metrics(obs, pred, spread, members):
     rows = []
     utility = utilities()
@@ -110,13 +121,7 @@ def metrics(obs, pred, spread, members):
                        KGE=utility.calculate_kge(o, p) if varying else np.nan,
                        obs_SD=o.std(), prediction_SD=p.std(),
                        RMS_spread=np.sqrt(np.mean(spread[paired, i]**2)))
-            block = ensemble[:, paired].astype(float)
-            q25, q75 = np.percentile(block, [25, 75], axis=0)
-            row.update(Ensemble_variance=block.var(axis=0).mean(), IQR=(q75-q25).mean(),
-                       Ensemble_SD=block.std(axis=0).mean(), MAD=np.abs(block-block.mean(axis=0)).mean())
-            if len(o) >= 2 and np.all(np.ptp(block, axis=1) > 0):
-                corr = np.corrcoef(block)
-                row["Pairwise_r"] = corr[np.triu_indices(len(block), k=1)].mean()
+            row.update(ensemble_statistics(ensemble[:, paired].astype(float)))
         rows.append(row)
     return pd.DataFrame(rows).reindex(columns=["paired_months", *METRICS, *STATS,
                                                "obs_SD", "prediction_SD", "RMS_spread"])
@@ -131,11 +136,15 @@ def save(fig, path, dpi=145):
     plt.close(fig)
 
 
-def maps(out, cells):
+def maps(out, cells, *, full=None, zoom=(-6.5, 41.0, 17.5, 56.25),
+         zoom_title="England and western–central Europe", coverage="paired_months",
+         metric_labels=None, statistic_labels=None, color_scales=None):
     x, y = cells.longitude, cells.latitude
-    full = (x.min()-2, y.min()-1, x.max()+2, y.max()+1)
-    zoom = (-6.5, 41.0, 17.5, 56.25)
-    bounds = box(*full).union(box(*zoom)).envelope
+    metric_labels = metric_labels or {key: key for key in METRICS}
+    statistic_labels = statistic_labels or {}
+    color_scales = color_scales or {}
+    full = full or (x.min()-2, y.min()-1, x.max()+2, y.max()+1)
+    bounds = box(*full) if zoom is None else box(*full).union(box(*zoom)).envelope
     borders = []
     shp = PROJECT.parent / "ne_10m_admin_0_countries/ne_10m_admin_0_countries.shp"
     with shapefile.Reader(str(shp)) as reader:
@@ -152,8 +161,11 @@ def maps(out, cells):
         norm = Normalize(-1, 1) if signed else None
         if len(values) and not signed:
             norm = Normalize(values.min(), values.quantile(.98))
+        cmap, norm = color_scales.get(key, ("RdBu_r" if signed else "viridis", norm))
+        if isinstance(norm, LogNorm):
+            values = values[values > 0]
         points = ax.scatter(x[values.index], y[values.index], c=values,
-                            cmap="RdBu_r" if signed else "viridis", norm=norm,
+                            cmap=cmap, norm=norm,
                             s=6, linewidths=0)
         west, south, east, north = extent
         ax.set(title=title, xlabel="Longitude (°E)", ylabel="Latitude (°N)",
@@ -163,25 +175,30 @@ def maps(out, cells):
 
     folder = out / "metric_maps"
     folder.mkdir()
-    for key in METRICS:
-        fig, axes = plt.subplots(1, 2, figsize=(12, 6), constrained_layout=True)
-        draw(axes[0], key, full, "Full study area")
-        points = draw(axes[1], key, zoom, "England and western–central Europe")
-        fig.colorbar(points, ax=axes, shrink=.7, label=key, extend="both")
-        fig.suptitle(key)
+    for key, label in metric_labels.items():
+        if zoom is None:
+            fig, axes = plt.subplots(figsize=(9, 5), constrained_layout=True)
+            points = draw(axes, key, full, "Full study area")
+        else:
+            fig, axes = plt.subplots(1, 2, figsize=(12, 6), constrained_layout=True)
+            draw(axes[0], key, full, "Full study area")
+            points = draw(axes[1], key, zoom, zoom_title)
+        fig.colorbar(points, ax=axes, shrink=.7, label=label, extend="both")
+        fig.suptitle(label)
         save(fig, folder / f"{key}.png")
 
     fig, axes = plt.subplots(2, 2, figsize=(9, 8), constrained_layout=True)
-    for ax, key in zip(axes.flat, ["paired_months", "RMS_spread", "obs_SD", "prediction_SD"]):
-        fig.colorbar(draw(ax, key, full, key), ax=ax, shrink=.7)
+    for ax, key in zip(axes.flat, [coverage, "RMS_spread", "obs_SD", "prediction_SD"]):
+        fig.colorbar(draw(ax, key, full, statistic_labels.get(key, key)), ax=ax, shrink=.7)
     save(fig, out / "statistics_maps.png")
 
 
-def paired_plot(ax, obs, pred, score, pooled=False):
+def paired_plot(ax, obs, pred, score, pooled=False, period="month",
+                value_label="standardized anomaly"):
     if len(obs):
         if pooled:
             density = ax.hexbin(obs, pred, gridsize=60, bins="log", mincnt=1)
-            ax.figure.colorbar(density, ax=ax, label="Cell-month count")
+            ax.figure.colorbar(density, ax=ax, label=f"Cell-{period} count")
         else:
             ax.scatter(obs, pred, s=10, alpha=.55, linewidths=0)
         lo, hi = min(obs.min(), pred.min()), max(obs.max(), pred.max())
@@ -189,10 +206,18 @@ def paired_plot(ax, obs, pred, score, pooled=False):
         ax.set_aspect("equal", adjustable="box")
     ax.text(.025, .975, f"R² = {number(score)}   n = {len(obs):,}",
             transform=ax.transAxes, va="top", bbox=dict(facecolor="white", alpha=.85, edgecolor="none"))
-    ax.set(xlabel="Observed standardized anomaly", ylabel="Ensemble mean standardized anomaly")
+    ax.set(xlabel=f"Observed {value_label}", ylabel=f"Ensemble mean {value_label}")
 
 
-def cell_figures(out, cells, dates, obs, pred, members, indices):
+def plot_members(ax, dates, members):
+    lines = ax.plot(dates, members.T, color=".45", alpha=.23, lw=.55)
+    lines[0].set_label("Individual members")
+
+
+def cell_figures(out, cells, dates, obs, pred, members, indices, *,
+                 metric_labels=None, value_label="standardized anomaly"):
+    metric_labels = metric_labels or {key: key for key in METRICS}
+    series_label = "Std. anomaly" if value_label == "standardized anomaly" else value_label
     ts = out / "timeseries"
     scatter = out / "cell_r2"
     ts.mkdir()
@@ -203,62 +228,93 @@ def cell_figures(out, cells, dates, obs, pred, members, indices):
         title = f"Cell {i}   ({row.latitude:.2f}°, {row.longitude:.2f}°)"
         fig, ax = plt.subplots(figsize=(9, 3.4))
         fig.subplots_adjust(top=.78, bottom=.18)
-        lines = ax.plot(dates, members[i].T, color=".45", alpha=.23, lw=.55)
-        lines[0].set_label("Individual members")
+        plot_members(ax, dates, members[i])
         ax.plot(dates, obs[:, i], label="Observation", color="#165e91", lw=1.3)
         ax.plot(dates, pred[:, i], label="Ensemble mean", color="#ae4120", lw=1.4)
         ax.legend(loc="upper center", bbox_to_anchor=(.5, -.10), ncol=3, frameon=False)
-        ax.set_ylabel("Std. anomaly")
-        ax.set_title("    ".join(f"{key} {number(row[key])}" for key in METRICS), fontsize=9)
+        ax.set_ylabel(series_label)
+        ax.set_title("    ".join(f"{label} {number(row[key])}" for key, label in metric_labels.items()),
+                     fontsize=9)
         fig.suptitle(title)
         save(fig, ts / name, dpi=110)
 
         paired = np.isfinite(obs[:, i]) & np.isfinite(pred[:, i])
         fig, ax = plt.subplots(figsize=(5, 4.3))
         fig.subplots_adjust(left=.17, bottom=.14)
-        paired_plot(ax, obs[paired, i], pred[paired, i], row.NSE)
+        paired_plot(ax, obs[paired, i], pred[paired, i], row.NSE, value_label=value_label)
         ax.set_title(title)
         save(fig, scatter / name, dpi=110)
 
 
-def figures(out, cells, months, obs, pred, members, indices):
-    maps(out, cells)
+def scale_metric_axis(ax, direction, values, scale):
+    if scale == "log":
+        getattr(ax, f"set_{direction}scale")("log")
+    elif scale == "symlog":
+        getattr(ax, f"set_{direction}scale")("symlog", linthresh=1)
+        getattr(ax, f"set_{direction}lim")(min(-1, values.min()), 1)
+        getattr(ax, f"{direction}axis").get_major_locator().set_params(numticks=5)
+
+
+def figures(out, cells, periods, obs, pred, members, indices, *, period="month", map_options=None,
+            metric_labels=None, statistic_labels=None, value_label="standardized anomaly",
+            paired_filename="paired_anomalies.png", axis_scales=None, show_example_members=False):
+    metric_labels = metric_labels or {key: key for key in METRICS}
+    statistic_labels = statistic_labels or {}
+    axis_scales = axis_scales or {}
+    maps(out, cells, metric_labels=metric_labels, statistic_labels=statistic_labels,
+         **(map_options or {}))
     fig, axes = plt.subplots(2, 3, figsize=(11, 6), constrained_layout=True)
-    for ax, key in zip(axes.flat, METRICS):
+    for ax, (key, label) in zip(axes.flat, metric_labels.items()):
         v = np.sort(cells[key].dropna())
-        ax.step(v, np.arange(1, len(v)+1) / max(len(v), 1), where="post")
-        ax.set(xlabel=key, ylabel="Fraction of cells", ylim=(0, 1.02))
-    axes.flat[-1].remove()
+        fraction = np.arange(1, len(v)+1) / max(len(v), 1)
+        shown = v > 0 if axis_scales.get(key) == "log" else slice(None)
+        ax.step(v[shown], fraction[shown], where="post")
+        ax.set(xlabel=label, ylabel="Fraction of cells", ylim=(0, 1.02))
+        scale_metric_axis(ax, "x", cells[key], axis_scales.get(key))
+    for ax in axes.flat[len(metric_labels):]:
+        ax.remove()
     save(fig, out / "metric_cdfs.png")
 
-    fig, axes = plt.subplots(len(METRICS), len(STATS), figsize=(16, 14), constrained_layout=True)
-    for row, key in zip(axes, METRICS):
+    fig, axes = plt.subplots(len(metric_labels), len(STATS), figsize=(16, 14),
+                             constrained_layout=True, squeeze=False)
+    for row, (key, label) in zip(axes, metric_labels.items()):
         for ax, stat in zip(row, STATS):
-            ax.scatter(cells[stat], cells[key], s=3, alpha=.35)
-            ax.set(xlabel=stat.replace("_", " "), ylabel=key)
+            pairs = cells[[stat, key]].dropna()
+            for column in (stat, key):
+                if axis_scales.get(column) == "log":
+                    pairs = pairs.loc[pairs[column] > 0]
+            ax.scatter(pairs[stat], pairs[key], s=3, alpha=.35)
+            ax.set(xlabel=statistic_labels.get(stat, stat.replace("_", " ")), ylabel=label)
+            scale_metric_axis(ax, "x", cells[stat], axis_scales.get(stat))
+            scale_metric_axis(ax, "y", cells[key], axis_scales.get(key))
     save(fig, out / "statistics_vs_metrics.png")
 
     fig, ax = plt.subplots(figsize=(6, 5), constrained_layout=True)
     paired = np.isfinite(obs) & np.isfinite(pred)
     o, p = obs[paired], pred[paired]
     score = prediction_r2(o, p)
-    paired_plot(ax, o, p, score, pooled=True)
-    ax.set_title("All paired cell-months")
-    save(fig, out / "paired_anomalies.png")
+    paired_plot(ax, o, p, score, pooled=True, period=period, value_label=value_label)
+    ax.set_title(f"All paired cell-{period}s")
+    save(fig, out / paired_filename)
     print(f"Global R² = {number(score)}", flush=True)
 
     ranked = cells.RMSE.dropna().sort_values()
     fig, axes = plt.subplots(3, 1, figsize=(11, 7), constrained_layout=True)
-    dates = months.to_timestamp()
+    dates = periods.to_timestamp() if isinstance(periods, pd.PeriodIndex) else periods
+    series_label = "Std. anomaly" if value_label == "standardized anomaly" else value_label
     for ax, q in zip(axes, [.1, .5, .9]):
         i = ranked.index[round(q*(len(ranked)-1))]
+        if show_example_members:
+            plot_members(ax, dates, members[i])
         ax.plot(dates, obs[:, i], label="Observation", lw=1)
         ax.plot(dates, pred[:, i], label="Ensemble mean", lw=1)
-        ax.set(title=f"Cell {i} · {q:.0%} RMSE rank · RMSE {ranked[i]:.2f}", ylabel="Std. anomaly")
-    axes[0].legend(ncol=2)
+        ax.set(title=f"Cell {i} · {q:.0%} RMSE rank · {metric_labels['RMSE']} {ranked[i]:.2f}",
+               ylabel=series_label)
+    axes[0].legend(ncol=3 if show_example_members else 2)
     save(fig, out / "example_series.png")
     start = monotonic()
-    cell_figures(out, cells, dates, obs, pred, members, indices)
+    cell_figures(out, cells, dates, obs, pred, members, indices, metric_labels=metric_labels,
+                 value_label=value_label)
     print(f"Rendered both figures for {len(indices)} cells in {monotonic()-start:.1f} s", flush=True)
 
 
