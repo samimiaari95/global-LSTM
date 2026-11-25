@@ -107,7 +107,9 @@ def load_target_scalers(member: int) -> Tuple[float, float, Path]:
     return mean, standard_deviation, scaler_path
 
 
-def validate_prepared_inputs(prepared_directory: Path) -> Tuple[int, int]:
+def validate_prepared_inputs(
+    prepared_directory: Path, conus: bool = False,
+) -> Tuple[int, int]:
     with (prepared_directory / "preprocessing.json").open(
         encoding="utf-8"
     ) as metadata_file:
@@ -123,12 +125,28 @@ def validate_prepared_inputs(prepared_directory: Path) -> Tuple[int, int]:
     pixels = np.load(
         prepared_directory / "selected_pixels.npy", mmap_mode="r", allow_pickle=False
     )
-    if dates.shape != (TARGET_DAY_COUNT,):
+    if conus:
+        if metadata.get("region") != "CONUS":
+            raise ValueError("Expected CONUS preparation metadata")
+        context = np.load(prepared_directory / "context_dates.npy", allow_pickle=False)
+        if (dates.ndim != 1 or not dates.size or dates.dtype.kind != "M"
+                or context.ndim != 1 or context.dtype.kind != "M"
+                or len(context) != LOOKBACK + len(dates) or np.isnat(context).any()
+                or not np.array_equal(context[LOOKBACK:], dates)):
+            raise ValueError("CONUS target dates must follow a complete lookback")
+        expected = np.arange(context[0], context[-1] + np.timedelta64(1, "D"), dtype="datetime64[D]")
+        expected = expected[~np.char.endswith(expected.astype(str), "-02-29")]
+        if not np.array_equal(context, expected):
+            raise ValueError("CONUS context dates must form one continuous no-leap calendar")
+        if (str(dates[0]) != metadata.get("target_start_date")
+                or str(dates[-1]) != metadata.get("target_end_date")):
+            raise ValueError("CONUS target dates disagree with preparation metadata")
+    elif dates.shape != (TARGET_DAY_COUNT,):
         raise ValueError(
             f"Expected {TARGET_DAY_COUNT} target dates for 1996-2012; got "
             f"{dates.shape}"
         )
-    if dates[0] != FIRST_TARGET_DATE or dates[-1] != LAST_TARGET_DATE:
+    if not conus and (dates[0] != FIRST_TARGET_DATE or dates[-1] != LAST_TARGET_DATE):
         raise ValueError(
             f"Target dates must span 1996-01-01 through 2012-12-31; got "
             f"{dates[0]} through {dates[-1]}"
@@ -140,6 +158,9 @@ def validate_prepared_inputs(prepared_directory: Path) -> Tuple[int, int]:
         raise ValueError(
             "Prepared selected_pixels.npy must contain non-empty (y, x) pairs"
         )
+    if conus and (len(pixels) != metadata.get("selected_pixel_count")
+                  or len(np.unique(pixels, axis=0)) != len(pixels)):
+        raise ValueError("CONUS pixel IDs must be unique and match the prepared cell count")
     return len(dates), len(pixels)
 
 
@@ -225,7 +246,10 @@ def run_prediction(
     run_started = time.monotonic()
     prepared_directory = args.prepared_directory.resolve()
     log_progress(f"validating prepared inputs in {prepared_directory}", rank)
-    target_day_count, pixel_count = validate_prepared_inputs(prepared_directory)
+    conus = args.output_directory is not None
+    target_day_count, pixel_count = validate_prepared_inputs(prepared_directory, conus)
+    target_dates = np.load(prepared_directory / "target_dates.npy", mmap_mode="r",
+                           allow_pickle=False)
     log_progress(
         f"validated {target_day_count:,} dates x {pixel_count:,} valid pixels "
         f"({target_day_count * pixel_count:,} predictions)",
@@ -264,7 +288,10 @@ def run_prediction(
         rank,
     )
 
-    prediction_path = member_directory / OUTPUT_FILENAME
+    if conus:
+        prediction_path = args.output_directory / f"member_{args.member:03d}" / "daily_wtd.npy"
+    else:
+        prediction_path = member_directory / OUTPUT_FILENAME
     temporary_path = Path(str(prediction_path) + ".partial")
     create_prediction_file(
         temporary_path,
@@ -359,9 +386,12 @@ def run_prediction(
             (prepared_directory / "selected_pixels.npy").resolve()
         ),
         "shape": [target_day_count, pixel_count],
-        "date_start": str(FIRST_TARGET_DATE),
-        "date_end": str(LAST_TARGET_DATE),
-        "units": "wtd_a units, destandardized with this member's wtdmean/wtdstd",
+        "date_start": str(target_dates[0]),
+        "date_end": str(target_dates[-1]),
+        "units": (
+            "Native training WTD units, destandardized with this member's wtdmean/wtdstd"
+            if conus else "wtd_a units, destandardized with this member's wtdmean/wtdstd"
+        ),
         "feature_standardization": (
             "Per-member feature means and standard deviations from the "
             "training scaler pickle."
@@ -397,6 +427,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--expected-world-size", type=int, default=EXPECTED_WORLD_SIZE
     )
+    parser.add_argument("--output-directory", type=Path,
+                        help="Use the CONUS calendar and write separate member predictions here.")
     return parser
 
 
