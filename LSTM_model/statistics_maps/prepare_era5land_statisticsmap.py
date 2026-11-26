@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from LSTM_model.data.predict_era5land_statisticsmap import (
+from LSTM_model.statistics_maps.predict_era5land_statisticsmap import (
     ENSEMBLE_MEMBERS,
     FEATURES_FILES,
     FIRST_CONTEXT_YEAR,

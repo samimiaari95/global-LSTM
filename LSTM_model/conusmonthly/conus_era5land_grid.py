@@ -10,9 +10,10 @@ import numpy as np
 import pandas as pd
 from pyproj import Proj
 
-from LSTM_model.data.conus_era5land_arco import GROUPS, arco_headers, grid_indices, open_arco_group
-from LSTM_model.data.conus_inputs import CONUS2_SHAPE
-from LSTM_model.data.conus_observations import MONTHLY_INPUTS, connect_hydrodata, read_sites, save_csv, save_json
+from LSTM_model.utils.era5land_arco import GROUPS, arco_headers, grid_indices, open_arco_group
+from LSTM_model.utils.file_io import save_csv, save_json
+from LSTM_model.conusmonthly.conus_inputs import CONUS2_SHAPE
+from LSTM_model.conusmonthly.conus_observations import MONTHLY_INPUTS, connect_hydrodata, read_sites
 from LSTM_model.model.config import get_root_dir
 
 

@@ -2,7 +2,6 @@
 
 import argparse
 import getpass
-import json
 import os
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -10,6 +9,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+from LSTM_model.utils.file_io import save_csv, save_json
 
 
 ROOT = Path("inputs/CONUS")
@@ -21,18 +22,6 @@ FREQUENCIES = {"daily": "D", "weekly": "W-SUN", "monthly": "M"}
 STATES = set("AL AZ AR CA CO CT DE DC FL GA ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT "
              "NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split())
 NWIS = dict(dataset="usgs_nwis", variable="water_table_depth", aggregation="mean")
-
-
-def save_csv(data, path, **kwargs):
-    temporary = path.with_name(f".{path.name}.partial")
-    data.to_csv(temporary, **kwargs)
-    temporary.replace(path)
-
-
-def save_json(data, path):
-    temporary = path.with_suffix(".partial")
-    temporary.write_text(json.dumps(data, indent=2) + "\n")
-    temporary.replace(path)
 
 
 def connect_hydrodata():

@@ -26,6 +26,7 @@ from LSTM_model.model.config import (
     OUTPUTPATH,
     OUTPUT_SIZE,
     AwesomeLSTM,
+    ensemble_member_paths,
 )
 
 
@@ -602,8 +603,7 @@ def build_lookback_features(
 
 
 def load_member_scalers(member: int) -> Dict[str, object]:
-    member_dir = Path(OUTPUTPATH) / "validation_ERA5" / "ensemble_400px" / f"400px_member_{member}"
-    scaler_path = member_dir / f"meanstd_400px_member_{member}_{MODEL_NAME}.pkl"
+    _, scaler_path = ensemble_member_paths(member)
     with scaler_path.open("rb") as scaler_file:
         scalers = pickle.load(scaler_file)
 
@@ -625,8 +625,7 @@ def load_member_scalers(member: int) -> Dict[str, object]:
 
 
 def load_member_model(member: int, device: torch.device) -> torch.nn.Module:
-    member_dir = Path(OUTPUTPATH) / "validation_ERA5" / "ensemble_400px" / f"400px_member_{member}"
-    model_path = member_dir / f"400px_member_{member}_{MODEL_NAME}.pt"
+    model_path, _ = ensemble_member_paths(member)
     model = AwesomeLSTM(INPUT_SIZE, HIDDEN_SIZE, OUTPUT_SIZE, NUM_LAYERS, DROPOUT)
     state_dict = torch.load(model_path, map_location=device, weights_only=True)
     model.load_state_dict(state_dict)
@@ -1040,9 +1039,7 @@ def run(args: argparse.Namespace) -> None:
 
     missing_members = []
     for member in args.members:
-        member_dir = Path(OUTPUTPATH) / "validation_ERA5" / "ensemble_400px" / f"400px_member_{member}"
-        model_path = member_dir / f"400px_member_{member}_{MODEL_NAME}.pt"
-        scaler_path = member_dir / f"meanstd_400px_member_{member}_{MODEL_NAME}.pkl"
+        model_path, scaler_path = ensemble_member_paths(member)
         if not model_path.is_file() or not scaler_path.is_file():
             missing_members.append(member)
     if missing_members:

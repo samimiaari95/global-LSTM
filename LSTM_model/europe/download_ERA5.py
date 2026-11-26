@@ -1,4 +1,4 @@
-import cdsapi
+from LSTM_model.utils.utils import utilities
 import os
 import calendar
 import threading
@@ -26,6 +26,8 @@ class DownloadWorker(threading.Thread):
                 self.queue.task_done()
 
 def download_era5_tp(download_dir, year, month):
+    import cdsapi
+
     dataset = "reanalysis-era5-land"
     request = {
         "variable": ["total_precipitation"],
@@ -47,7 +49,8 @@ def download_era5_tp(download_dir, year, month):
         "time": ["23:00"],
         "data_format": "netcdf",
         "download_format": "unarchived",
-        "area": [74, -48, 20, 69]
+        "area": [74, -48, 20, 69] # north, west, south, east. Default: global
+        # "area": [56, -4.0, 40.0, 22.0]
     }
 
     filename = f"at23h_ERA5land_tp_{year}{month}.nc"
@@ -58,6 +61,8 @@ def download_era5_tp(download_dir, year, month):
     print(f"{filename} downloaded successfully.")
 
 def download_era5_t2m_d2m_swvl3_reanalysis_era5_land(download_dir, year, month):
+    import cdsapi
+
     dataset = "reanalysis-era5-land"
     request = {
         "variable": [
@@ -102,6 +107,8 @@ def download_era5_t2m_d2m_swvl3_reanalysis_era5_land(download_dir, year, month):
     print(f"{filename} downloaded successfully.")
 
 def download_era5_t2m_d2m_swvl3_derived_era5_land_daily_statistics(download_dir, year, month):
+    import cdsapi
+
     dataset  = "derived-era5-land-daily-statistics"
     request = {
         "variable": [
@@ -167,13 +174,16 @@ def extract_downloaded_zips(download_dir, year, month):
             print(f"Renamed {filename} to {new_filename}")
 
 def request_ERA5_t2m_d2m_swvl3():
-    for year in range(1999, 2000):
+    for year in range(1996, 2000):
         for month in range(1, 13):
-            download_era5_t2m_d2m_swvl3_derived_era5_land_daily_statistics(download_dir=os.path.join(INPUTPATH, "raw", "ERA5-Land"), year=str(year), month=f"{month:02d}")
+            if month < 9 and year == 1998:
+                continue  # Skip December 1995 as it has already been downloaded
+            # download_era5_t2m_d2m_swvl3_derived_era5_land_daily_statistics(download_dir=os.path.join(INPUTPATH, "raw", "ERA5-Land"), year=str(year), month=f"{month:02d}")
+            download_era5_t2m_d2m_swvl3_reanalysis_era5_land(download_dir=os.path.join(INPUTPATH, "raw", "ERA5-Land"), year=str(year), month=f"{month:02d}")
 
 def request_ERA5_tp():
-    for year in range(2000, 2001):
-        for month in range(7, 13):
+    for year in range(2016, 2017):
+        for month in range(1, 13):
             download_era5_tp(download_dir=os.path.join(INPUTPATH, "raw", "ERA5-Land"), year=str(year), month=f"{month:02d}")
 
 def extract_allzipfiles():

@@ -3,7 +3,7 @@ import pickle
 import h5py
 import datetime
 from torch.utils.data import DataLoader, TensorDataset, Dataset
-from LSTM_model.data.preprocess_era5land_observation_inputs import _load_member_scalers
+from LSTM_model.model.ensemble_inputs import load_feature_scalers
 from LSTM_model.model.config import *
 from LSTM_model.utils.utils import utilities
 
@@ -49,14 +49,15 @@ class transfer_ensemble_LSTM:
 
 
         # import training mean and std (saved during training process)
-        with open(os.path.join(OUTPUTPATH, "validation_ERA5", "ensemble_400px", f"400px_member_{member}", f"meanstd_400px_member_{member}_{MODEL_NAME}.pkl"), 'rb') as f:
+        model_path, scaler_path = ensemble_member_paths(member)
+        with scaler_path.open("rb") as f:
             means_stds = pickle.load(f)
         f.close()
         
         # load the model
         # device = torch.device('cpu')
         lstm_model = AwesomeLSTM(INPUT_SIZE, HIDDEN_SIZE, OUTPUT_SIZE, NUM_LAYERS, DROPOUT)
-        lstm_model.load_state_dict(torch.load(os.path.join(OUTPUTPATH, "validation_ERA5", "ensemble_400px", f"400px_member_{member}", f"400px_member_{member}_{MODEL_NAME}.pt"), map_location=device, weights_only=True))
+        lstm_model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
         criterion = nn.MSELoss()
 
         lstm_model = lstm_model.to(device) # Move the model to the GPU
@@ -72,7 +73,7 @@ class transfer_ensemble_LSTM:
         obs_stand_input, means_stds = utils.transferpx_targetvar_testsinglepixel(0, TEST_PERIOD-LOOKBACK, means_stds)
         # usually starting from LOOKBACK to TEST_PERIOD, but here we start from 0 to TEST_PERIOD since we don't provide wtd of TSMP for 1999, 
         # we don't need it because we will later compare to observations not TSMP
-        feature_means, feature_stds = _load_member_scalers(member)
+        feature_means, feature_stds = load_feature_scalers(member)
         features_stand_inputs = utils.transferpx_inputfeatures_testsinglepixel(
             0, TEST_PERIOD, feature_means, feature_stds
         )
@@ -128,7 +129,9 @@ class transfer_ensemble_LSTM:
         # print(f"obs destand shape: {obs_destand.shape}")
         print(f"sim destand shape: {sim_destand.shape}")
         # np.save(os.path.join(OUTPUTPATH, "validation_ERA5", "ensemble_400px", f"400px_member_{member}", f"obs_localobspixels.npy"), obs_destand)
-        np.save(os.path.join(OUTPUTPATH, "validation_ERA5", "ensemble_400px", f"400px_member_{member}", f"sim_ERA5onsingleobspixel.npy"), sim_destand)
+        output_dir = ENSEMBLE_PREDICTION_DIRECTORY / f"400px_member_{member}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        np.save(output_dir / "sim_ERA5onsingleobspixel.npy", sim_destand)
         torch.distributed.destroy_process_group()
         print(f"time: {datetime.datetime.now().time()}")
         return print("saved destandardized arrays")

@@ -22,7 +22,7 @@ from scipy.optimize import curve_fit
 from scipy.stats import gaussian_kde
 from LSTM_model.utils.plot_functions import plotting_helper
 from LSTM_model.utils.utils import utilities
-from LSTM_model.data.obs_processing import obs_processing
+from LSTM_model.europe.obs_processing import obs_processing
 from LSTM_model.model.config import *
 
 
@@ -4920,7 +4920,7 @@ class postprocess_calculations:
         hist_fig.savefig(hist_path, dpi=300, bbox_inches="tight")
         plt.close(hist_fig)
 
-        review_path = os.path.join(os.path.dirname(__file__), "moransI_review.md")
+        review_path = os.path.join(morans_i_dir, "moransI_review.md")
         review_lines = [
             "# Moran's I Review",
             "",
@@ -5619,6 +5619,137 @@ class postprocess_calculations:
         plt.close(fig)
         print(f"Saved TSMP ensemble variance map to {figure_path}")
         return variance_map
+
+    def plottimeseries_singlepixel_selfvsAI(self):
+        y = 231
+        x = 193
+        member_output_dir = os.path.join(
+            OUTPUTPATH, "validation_ERA5", "ensemble_400px", "400px_member_1"
+        )
+        aiwtd = np.load(
+            os.path.join(
+                member_output_dir,
+                "sim_ERA5on_observed_valid_pixels_1996_2012.npy",
+            )
+        )
+        mywtd = np.load(
+            os.path.join(member_output_dir, "sim_ERA5onsingleobspixel.npy")
+        )
+
+        ai_inputs_dir = os.path.join(INPUTPATH, "era5land_inputs_1996_2012")
+        my_inputs_dir = os.path.join(
+            INPUTPATH, "validation_ERA5", "testingAImember0singlepixel"
+        )
+        ai_pixels = np.load(os.path.join(ai_inputs_dir, "selected_pixels.npy"))
+        if ai_pixels.ndim != 2 or ai_pixels.shape[1] != 2:
+            raise ValueError(
+                f"AI selected pixels must have shape (n, 2); got {ai_pixels.shape}"
+            )
+        ai_pixel_matches = np.flatnonzero(
+            np.all(ai_pixels == (y, x), axis=1)
+        )
+        if ai_pixel_matches.size != 1:
+            raise ValueError(
+                f"Expected exactly one AI input pixel at y={y}, x={x}; "
+                f"found {ai_pixel_matches.size}"
+            )
+        ai_pixel_index = int(ai_pixel_matches[0])
+
+        dates = np.load(os.path.join(ai_inputs_dir, "context_dates.npy"))
+        ai_dynamic = np.load(os.path.join(ai_inputs_dir, "dynamic_features.npy"))
+        ai_static = np.load(os.path.join(ai_inputs_dir, "static_features.npy"))
+        if (
+            ai_dynamic.ndim != 3
+            or ai_dynamic.shape[:2]
+            != (len(FEATURES_FILES[:3]), len(dates))
+            or ai_dynamic.shape[2] != len(ai_pixels)
+        ):
+            raise ValueError(
+                f"Unexpected AI dynamic input shape {ai_dynamic.shape} "
+                f"for {len(dates)} dates and {len(FEATURES_FILES[:3])} features"
+            )
+        if ai_static.shape != (
+            len(FEATURES_FILES[3:]),
+            len(ai_pixels),
+        ):
+            raise ValueError(
+                f"Unexpected AI static input shape {ai_static.shape}"
+            )
+        if aiwtd.ndim != 2 or ai_pixel_index >= aiwtd.shape[1]:
+            raise ValueError(
+                f"AI WTD output has unexpected shape {aiwtd.shape}; selected "
+                f"pixel index is {ai_pixel_index}"
+            )
+
+        aiwtd_pixel = aiwtd[:, ai_pixel_index]
+        mywtd = mywtd[:6205,0]
+        print(aiwtd_pixel.shape, mywtd.shape)
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.plot(aiwtd_pixel, label="AI WTD", color="blue")
+        ax.plot(mywtd, label="My WTD", color="orange", linestyle="--")
+        ax.set_xlabel("Time step")
+        ax.set_ylabel("WTD value")
+        ax.legend()
+        plt.savefig(
+            os.path.join(
+                member_output_dir, f"time_series_comparison_{y}_{x}.png"
+            ),
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plt.close(fig)
+
+        input_plots_dir = os.path.join(
+            member_output_dir, f"input_comparisons_{y}_{x}"
+        )
+        os.makedirs(input_plots_dir, exist_ok=True)
+        dynamic_feature_count = len(FEATURES_FILES[:3])
+        for feature_index, feature_file in enumerate(FEATURES_FILES):
+            feature_name = os.path.splitext(feature_file)[0]
+            my_feature = np.load(os.path.join(my_inputs_dir, feature_file))
+            if my_feature.ndim != 1 or len(my_feature) < len(dates):
+                raise ValueError(
+                    f"{feature_file} must contain at least {len(dates)} "
+                    f"single-pixel values; got shape {my_feature.shape}"
+                )
+            my_feature = my_feature[:len(dates)]
+
+            if feature_index < dynamic_feature_count:
+                ai_feature = ai_dynamic[feature_index, :, ai_pixel_index]
+            else:
+                ai_feature = np.full(
+                    len(dates),
+                    ai_static[
+                        feature_index - dynamic_feature_count, ai_pixel_index
+                    ],
+                )
+
+            fig, ax = plt.subplots(figsize=(12, 5))
+            ax.plot(dates, ai_feature, label="AI input", color="blue")
+            ax.plot(
+                dates,
+                my_feature,
+                label="My input",
+                color="orange",
+                linestyle="--",
+            )
+            ax.set_title(f"{feature_name} at y={y}, x={x}")
+            ax.set_xlabel("Date")
+            ax.set_ylabel(feature_name)
+            ax.xaxis.set_major_locator(mdates.YearLocator(2))
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+            ax.legend()
+            fig.autofmt_xdate()
+            fig.savefig(
+                os.path.join(
+                    input_plots_dir,
+                    f"input_comparison_{feature_name}_{y}_{x}.png",
+                ),
+                dpi=300,
+                bbox_inches="tight",
+            )
+            plt.close(fig)
+
 
     def postprocess_era5wtd_vs_obs(self):
         # self.calc_anomalies_from_sim_claude()

@@ -1,5 +1,6 @@
 import os
 import logging
+from pathlib import Path
 import torch
 import torch.nn as nn
 
@@ -10,7 +11,7 @@ def get_root_dir():
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
 # number of cells
-X = 21613
+X = 349
 Y = 2
 NB_CELLS = X*Y
 
@@ -22,13 +23,13 @@ REGION = f"EU_74_-48_69_20"
 # directory and inputs
 OUTPUTPATH = os.path.join(get_root_dir(), "outputs", REGION)
 INPUTPATH = os.path.join(get_root_dir(), "inputs", REGION)
-FEATURES_FILES = ["tp_EU.npy", "vpd_EU.npy", "swvl3_EU.npy", "slopex.npy", "slopey.npy", "soilind.npy", "lon2D_ts.npy", "lat2D_ts.npy"]
-TARGETVAR_FILE = "wtd_2000-2015.npy"
+FEATURES_FILES = ["tp_1995_2016.npy", "vpd_1995_2016.npy", "swvl3_1995_2016.npy", "slopex.npy", "slopey.npy", "soilind.npy", "lon2D_ts.npy", "lat2D_ts.npy"]
+TARGETVAR_FILE = "wtd_1996-2016.npy"
 
 # time period
 TRAINING_PERIOD = 365*15
 LOOKBACK = 365
-TEST_PERIOD = 365*16+LOOKBACK
+TEST_PERIOD = 365*21+LOOKBACK
 
 # lstm setup
 INPUT_SIZE = len(FEATURES_FILES)
@@ -46,6 +47,16 @@ BATCH_SIZE = 1000
 # model name
 MODEL_NAME = f"{NUM_EPOCHS}_{HIDDEN_SIZE}dr{str(DROPOUT).replace('0.','')}x{NUM_LAYERS}lr{str(LR_GAMMA).replace('.','')}x{LR_STEP_SIZE}_{LOOKBACK}x{BATCH_SIZE}_prvpdsmxyind" if LR_SCHEDULER else f"{NUM_EPOCHS}_{HIDDEN_SIZE}dr{str(DROPOUT).replace('0.','')}x{NUM_LAYERS}_{LOOKBACK}x{BATCH_SIZE}_prvpdsmxyind"
 logger.warning(f"Model name: {MODEL_NAME}")
+
+ENSEMBLE_MODEL_DIRECTORY = Path(__file__).resolve().parent / "ensemble_400px"
+ENSEMBLE_PREDICTION_DIRECTORY = Path(OUTPUTPATH) / "validation_ERA5" / "ensemble_400px"
+
+
+def ensemble_member_paths(member):
+    """Return the checkpoint and fitted scaler paths for an ensemble member."""
+    label = f"400px_member_{member}"
+    directory = ENSEMBLE_MODEL_DIRECTORY / label
+    return directory / f"{label}_{MODEL_NAME}.pt", directory / f"meanstd_{label}_{MODEL_NAME}.pkl"
 
 
 class AwesomeLSTM(nn.Module):

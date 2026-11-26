@@ -14,10 +14,7 @@ import numpy as np
 import torch
 from torch.nn.parallel import DistributedDataParallel
 
-from LSTM_model.data.preprocess_era5land_observation_inputs import (
-    OUTPUT_DIRECTORY as DEFAULT_PREPARED_DIRECTORY,
-    iter_member_input_batches,
-)
+from LSTM_model.model.ensemble_inputs import iter_member_input_batches
 from LSTM_model.model.config import (
     BATCH_SIZE,
     DROPOUT,
@@ -25,11 +22,12 @@ from LSTM_model.model.config import (
     HIDDEN_SIZE,
     INPUT_SIZE,
     LOOKBACK,
-    MODEL_NAME,
+    ENSEMBLE_PREDICTION_DIRECTORY,
+    INPUTPATH,
     NUM_LAYERS,
-    OUTPUTPATH,
     OUTPUT_SIZE,
     AwesomeLSTM,
+    ensemble_member_paths,
 )
 
 
@@ -38,7 +36,7 @@ FIRST_TARGET_DATE = np.datetime64("1996-01-01", "D")
 LAST_TARGET_DATE = np.datetime64("2012-12-31", "D")
 TARGET_DAY_COUNT = 17 * 365
 EXPECTED_WORLD_SIZE = 4
-ENSEMBLE_DIRECTORY = Path(OUTPUTPATH) / "validation_ERA5" / "ensemble_400px"
+DEFAULT_PREPARED_DIRECTORY = Path(INPUTPATH) / "era5land_inputs_1996_2012"
 OUTPUT_FILENAME = "sim_ERA5on_observed_valid_pixels_1996_2012.npy"
 
 
@@ -83,11 +81,7 @@ def initialize_distributed(
 
 
 def load_target_scalers(member: int) -> Tuple[float, float, Path]:
-    member_directory = ENSEMBLE_DIRECTORY / f"400px_member_{member}"
-    scaler_path = (
-        member_directory
-        / f"meanstd_400px_member_{member}_{MODEL_NAME}.pkl"
-    )
+    _, scaler_path = ensemble_member_paths(member)
     with scaler_path.open("rb") as scaler_file:
         scalers: Dict[str, Any] = pickle.load(scaler_file)
 
@@ -265,10 +259,7 @@ def run_prediction(
         rank,
     )
 
-    member_directory = ENSEMBLE_DIRECTORY / f"400px_member_{args.member}"
-    model_path = (
-        member_directory / f"400px_member_{args.member}_{MODEL_NAME}.pt"
-    )
+    model_path, _ = ensemble_member_paths(args.member)
     device = torch.device("cuda", local_rank)
     model_started = time.monotonic()
     log_progress(f"loading checkpoint {model_path}", rank)
@@ -291,7 +282,7 @@ def run_prediction(
     if conus:
         prediction_path = args.output_directory / f"member_{args.member:03d}" / "daily_wtd.npy"
     else:
-        prediction_path = member_directory / OUTPUT_FILENAME
+        prediction_path = ENSEMBLE_PREDICTION_DIRECTORY / f"400px_member_{args.member}" / OUTPUT_FILENAME
     temporary_path = Path(str(prediction_path) + ".partial")
     create_prediction_file(
         temporary_path,

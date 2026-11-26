@@ -491,7 +491,7 @@ class plotting_helper:
         indexes = [str(x) for x in indexes]
         indexes = "".join(indexes)
         print(f"saving one pixel at {indexes}")
-        fig.savefig(os.path.join(OUTPUTPATH, f"{indexes}_{TARGET_REGION}.png"))
+        fig.savefig(os.path.join(OUTPUTPATH, f"{indexes}_{REGION}.png"))
 
     def selectedpixels_in_EU(self, mappingpath):
         mapping = np.load(mappingpath)
@@ -519,7 +519,7 @@ class plotting_helper:
         ax.coastlines(color='black')
         ax.gridlines(draw_labels=True)
         
-        print(f"saving selected pixels at {TARGET_REGION}")
+        print(f"saving selected pixels at {REGION}")
         filename = os.path.basename(mappingpath)
         filename = filename.split(".")[0]
         fig.savefig(os.path.join(os.path.dirname(OUTPUTPATH), f"{filename}.png"))

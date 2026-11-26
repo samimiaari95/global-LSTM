@@ -8,6 +8,7 @@ from pyproj import CRS, Transformer
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from sklearn.preprocessing import OneHotEncoder
+from pathlib import Path
 from LSTM_model.model.config import *
 from LSTM_model.utils.plot_functions import plotting_helper
 from LSTM_model.utils.utils import utilities
@@ -48,6 +49,16 @@ class preprocessing_data:
             feature = feature[:365*7,:,:]
             print(feature.shape)
             plot_functions.correlation_map(targetvar, feature, f"10yrscorrelation_wtd_{f.replace('.npy','')}", 5, 5, lons, lats)
+
+    def singlepixeltesting(self):
+        y = 231
+        x = 193
+        dirpath = os.path.join(INPUTPATH, "validation_ERA5", "testingAImember0singlepixel")
+        dirfiles = [x for x in os.listdir(dirpath) if x.endswith(".npy")]
+        for file in dirfiles:
+            print(file)
+            data = np.load(os.path.join(dirpath, file))
+            print(data.shape)
 
     def static_timeseries(self):
         staticfiles = ["slopex.npy", "slopey.npy", "soilind.npy", "lon2D_ts.npy", "lat2D_ts.npy"]
@@ -335,17 +346,25 @@ class preprocessing_data:
             # shutil.copy2(os.path.join(indir, f"target_pixels_{i}", f"mappingindices_{i}.npy"), os.path.join(outdir, f"target_pixels_{i}", f"mappingindices_{i}.npy"))
             shutil.copy2(os.path.join(indir, f"400px_member_{i}", f"choices.npy"), os.path.join(outdir, f"400px_member_{i}", f"choices.npy"))
 
-    def get_pretrained400pxmodels(self):
-        utils = utilities()
-        indir = "/p/project1/cslts/miaari1/python_scripts/spatio-temporal-LSTM/outputs/20yrs_ts/ensemble_400px"
-        outdir = os.path.join(OUTPUTPATH, "validation_ERA5", "ensemble_400px")
-        for i in range(100):
-            print(f"member {i}")
-            utils.make_dir(os.path.join(outdir, f"400px_member_{i}"))
-            shutil.copy2(os.path.join(indir, f"400px_member_{i}", f"400px_member_{i}_100_256dr0x1lr01x50_365x1000_prvpdsmxyind.png"), os.path.join(outdir, f"400px_member_{i}", f"400px_member_{i}_100_256dr0x1lr01x50_365x1000_prvpdsmxyind.png"))
-            shutil.copy2(os.path.join(indir, f"400px_member_{i}", f"400px_member_{i}_100_256dr0x1lr01x50_365x1000_prvpdsmxyind.pt"), os.path.join(outdir, f"400px_member_{i}", f"400px_member_{i}_100_256dr0x1lr01x50_365x1000_prvpdsmxyind.pt"))
-            shutil.copy2(os.path.join(indir, f"400px_member_{i}", f"meanstd_400px_member_{i}_100_256dr0x1lr01x50_365x1000_prvpdsmxyind.pkl"), os.path.join(outdir, f"400px_member_{i}", f"meanstd_400px_member_{i}_100_256dr0x1lr01x50_365x1000_prvpdsmxyind.pkl"))
-    
+    def get_pretrained400pxmodels(self, source_directory=None):
+        if source_directory is None:
+            source_directory = (
+                Path(get_root_dir()).parents[1] / "spatio-temporal-LSTM"
+                / "outputs" / "20yrs_ts" / "ensemble_400px"
+            )
+        source_directory = Path(source_directory)
+        for member in range(100):
+            checkpoint, scaler = ensemble_member_paths(member)
+            checkpoint.parent.mkdir(parents=True, exist_ok=True)
+            source_member = source_directory / checkpoint.parent.name
+            for destination in (checkpoint, scaler):
+                shutil.copy2(source_member / destination.name, destination)
+            training_plot = source_member / checkpoint.with_suffix(".png").name
+            if training_plot.is_file():
+                output_dir = ENSEMBLE_PREDICTION_DIRECTORY / checkpoint.parent.name
+                output_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(training_plot, output_dir / training_plot.name)
+
     def find_leastdistance_TSMPpixel_to_EUobs(self, lon, lat):
         # load TSMP lonlat
         lons = np.load(os.path.join(INPUTPATH, "lon2D.npy"))
@@ -596,7 +615,7 @@ class preprocessing_data:
         for member in range(40, 50):
             print(f"Preparing input and target arrays for member {member}")
             print(f"time: {datetime.datetime.now().time()}")
-            with open(os.path.join(OUTPUTPATH, "validation_ERA5", "ensemble_400px", f"400px_member_{member}", f"meanstd_400px_member_{member}_{MODEL_NAME}.pkl"), 'rb') as f:
+            with open(ensemble_member_paths(member)[1], 'rb') as f:
                 means_stds = pickle.load(f)
             f.close()
 
@@ -657,7 +676,7 @@ class preprocessing_data:
         for member in range(99, 100):
             print(f"Preparing input and target arrays for member {member}")
             print(f"time: {datetime.datetime.now().time()}")
-            with open(os.path.join(OUTPUTPATH, "validation_ERA5", "ensemble_400px", f"400px_member_{member}", f"meanstd_400px_member_{member}_{MODEL_NAME}.pkl"), 'rb') as f:
+            with open(ensemble_member_paths(member)[1], 'rb') as f:
                 means_stds = pickle.load(f)
             f.close()
 

@@ -1,8 +1,6 @@
 import os
 import numpy as np
-import netCDF4 as nc
 import xarray as xr
-import h5py
 from typing import Dict, Union, List, Optional
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -42,10 +40,12 @@ class utilities:
         return a * np.exp(b * x)
 
     def read_nc(self, filepath, var):
+        import netCDF4 as nc
         ncfile = nc.Dataset(filepath)
         return ncfile[var][:]
 
     def open_nc(self, filepath):
+        import netCDF4 as nc
         ncfile = nc.Dataset(filepath)
         variables = ncfile.variables
         for var in variables:
@@ -76,12 +76,10 @@ class utilities:
         # Compute correlation coefficient (r)
         r = np.corrcoef(observed, predicted)[0, 1]
 
-        # Compute mean and standard deviation
-        mu_o, mu_p = np.mean(observed), np.mean(predicted)
+        # Compute standard deviations
         sigma_o, sigma_p = np.std(observed), np.std(predicted)
 
         # Compute bias ratio (β) and variability ratio (γ)
-        beta = mu_p / mu_o
         beta = 1 # for anomalies the mean is zero, so we set beta to 1 to avoid undetermined devision of 0/0
         gamma = sigma_p / sigma_o
 

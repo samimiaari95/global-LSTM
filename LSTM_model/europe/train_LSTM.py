@@ -61,7 +61,7 @@ class train_LSTM_model():
         obs_stand_train, means_stds = utils.singleregion_targetvar(LOOKBACK, TRAINING_PERIOD, means_stds)
 
         # save training data mean and std
-        with open(os.path.join(OUTPUTPATH, f"meanstd_{TARGET_REGION}_{MODEL_NAME}.pkl"), 'wb') as f:
+        with open(os.path.join(OUTPUTPATH, f"meanstd_{REGION}_{MODEL_NAME}.pkl"), 'wb') as f:
             pickle.dump(means_stds, f)
         f.close()
 
@@ -109,7 +109,7 @@ class train_LSTM_model():
             if LR_SCHEDULER: scheduler.step()
 
             # save the trained model
-            torch.save(lstm_model.module.state_dict(), os.path.join(OUTPUTPATH, f'{TARGET_REGION}_{MODEL_NAME}.pt'))
+            torch.save(lstm_model.module.state_dict(), os.path.join(OUTPUTPATH, f'{REGION}_{MODEL_NAME}.pt'))
             print("model saved")
             # plot epochs vs loss
             epoch_vs_loss_plot = {k:np.mean(np.array(v)) for k, v in epoch_loss.items()}
@@ -117,6 +117,6 @@ class train_LSTM_model():
             epoch_plot.plot(list(epoch_vs_loss_plot.keys()), list(epoch_vs_loss_plot.values()))
             epoch_plot.xlabel("Epochs")
             epoch_plot.ylabel("MSE")
-            epoch_plot.savefig(os.path.join(OUTPUTPATH, f'{TARGET_REGION}_{MODEL_NAME}.png'))
+            epoch_plot.savefig(os.path.join(OUTPUTPATH, f'{REGION}_{MODEL_NAME}.png'))
             print("epoch loss plotted")
         torch.distributed.destroy_process_group()

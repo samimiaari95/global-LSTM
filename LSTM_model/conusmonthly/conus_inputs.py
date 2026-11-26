@@ -13,10 +13,12 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from LSTM_model.data.conus_observations import (
-    MONTHLY_GRID, MONTHLY_INPUTS, connect_hydrodata, read_sites, save_csv, save_json,
+from LSTM_model.conusmonthly.conus_observations import (
+    MONTHLY_GRID, MONTHLY_INPUTS, connect_hydrodata, read_sites,
 )
+from LSTM_model.utils.file_io import save_csv, save_json
 from LSTM_model.model.config import FEATURES_FILES, LOOKBACK
+from LSTM_model.utils.era5land_arco import stage_daily_predictors
 
 
 DAILY_VARIABLES = {
@@ -261,15 +263,6 @@ def read_era5(path, variables, pixels, dates, hour):
     return values
 
 
-def stage_daily_predictors(dynamic, mask, fields):
-    temperature = fields["t2m"] - 273.15
-    dewpoint = fields["d2m"] - 273.15
-    es = .611 * np.exp(17.27 * temperature / (temperature + 237.3))
-    ea = .611 * np.exp(17.27 * dewpoint / (dewpoint + 237.3))
-    dynamic[1, mask, :] = es - ea
-    dynamic[2, mask, :] = fields["swvl3"]
-
-
 def load_arco_predictors(root, dates, pixels, dynamic):
     path = root / "era5land" / "arco_daily_points.npz"
     with np.load(path, allow_pickle=False) as data:
@@ -372,10 +365,11 @@ def prepare(root, forcing_source="cds"):
 
 
 def preflight(root):
-    from LSTM_model.data.predict_era5land_observations import (
-        ENSEMBLE_DIRECTORY, MODEL_NAME, load_target_scalers, validate_prepared_inputs,
+    from LSTM_model.model.predict_era5land_observations import (
+        load_target_scalers, validate_prepared_inputs,
     )
-    from LSTM_model.data.preprocess_era5land_observation_inputs import iter_member_input_batches
+    from LSTM_model.model.config import ensemble_member_paths
+    from LSTM_model.model.ensemble_inputs import iter_member_input_batches
 
     prepared = (root / "prepared").resolve()
     dates, pixel_count = validate_prepared_inputs(prepared, conus=True)
@@ -407,8 +401,7 @@ def preflight(root):
                     or (prediction_cells | excluded_cells) != archived_cells):
                 raise ValueError("Prepared cells and exclusions do not partition the gridded observations")
     for member in range(100):
-        identifier = f"400px_member_{member}"
-        checkpoint = ENSEMBLE_DIRECTORY / identifier / f"{identifier}_{MODEL_NAME}.pt"
+        checkpoint, _ = ensemble_member_paths(member)
         if not checkpoint.is_file() or checkpoint.stat().st_size == 0:
             raise FileNotFoundError(f"Missing or empty checkpoint {checkpoint}")
         load_target_scalers(member)
