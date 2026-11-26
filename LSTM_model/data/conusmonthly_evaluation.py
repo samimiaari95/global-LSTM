@@ -10,10 +10,16 @@ import pandas as pd
 import xarray as xr
 
 from LSTM_model.data.conus_observations import MONTHLY_END, MONTHLY_GRID, MONTHLY_START, read_sites
-from LSTM_model.data.postprocess_era5land_observations import METRICS, MEMBERS, figures, metrics
+from LSTM_model.data.postprocess_era5land_observations import (
+    MEMBERS, METRICS, country_borders, figures, metrics, rank_histogram, save, spatial_axes,
+)
 from LSTM_model.data.predict_era5land_observations import validate_prepared_inputs
 
+import matplotlib.pyplot as plt
+from shapely.geometry import box
+
 MONTHLY_OUTPUTS = Path("outputs/CONUSmonthly")
+MAP_EXTENT = (-126, 23, -65, 51)
 
 
 def anomalies(values, periods):
@@ -71,6 +77,32 @@ def aggregate_predictions(prepared, predictions, dates, periods, starts, counts,
     return mean_raw, mean, np.sqrt(np.maximum(m2, 0) / (MEMBERS - 1)), members
 
 
+def observation_locations(output, prepared, pixels, location_map):
+    mapping = prepared.parent / "well_era5land_cells.csv"
+    if not mapping.is_file():
+        mapping = prepared / "stations_with_static.csv"
+    wells = read_sites(mapping)
+    assigned = wells.drop_duplicates(["y", "x"])
+    evaluated = pd.MultiIndex.from_arrays(pixels.T, names=["y", "x"])
+    borders, extent = location_map
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.5), constrained_layout=True)
+    panels = (
+        (wells, "longitude", "latitude", "Valid wells", "o"),
+        (assigned, "grid_longitude", "grid_latitude", "Assigned ERA5-Land cells", "s"),
+    )
+    for ax, (points, lon, lat, title, marker) in zip(axes, panels):
+        included = pd.MultiIndex.from_frame(points[["y", "x"]]).isin(evaluated)
+        spatial_axes(ax, borders, extent)
+        ax.scatter(points.loc[included, lon], points.loc[included, lat], marker=marker,
+                   s=7, alpha=.7, linewidths=0, color="#165e91", label="Included in evaluation")
+        if not included.all():
+            ax.scatter(points.loc[~included, lon], points.loc[~included, lat], marker=marker,
+                       s=11, linewidths=0, color="#ae4120", label="Observation archive only")
+        ax.set(title=f"{title} ({len(points):,})", xlabel="Longitude (°E)", ylabel="Latitude (°N)")
+    axes[1].legend(loc="lower left", markerscale=2, fontsize=9)
+    save(fig, output / "well_locations_and_grid_cells.png")
+
+
 def evaluate(prepared, predictions, output, plot_cells=None):
     prepared = prepared.resolve()
     _, ncell = validate_prepared_inputs(prepared, conus=True)
@@ -125,8 +157,12 @@ def evaluate(prepared, predictions, output, plot_cells=None):
         dataset.attrs.update(cadence="monthly", members=MEMBERS,
                              anomaly_baseline="Separate calendar-month z-scores, 2020–2024, ddof=0")
         dataset.to_netcdf(result / "evaluation_series.nc", engine="scipy")
+        location_map = country_borders(box(*MAP_EXTENT)), MAP_EXTENT
+        observation_locations(result, prepared, pixels, location_map)
+        rank_histogram(result, obs.astype(members.dtype, copy=False), members)
         figures(result, cells, periods, obs, pred, members, indices,
-                map_options={"full": (-126, 23, -65, 51), "zoom": None})
+                map_options={"full": MAP_EXTENT, "zoom": None}, location_map=location_map,
+                value_label="WTD anomalies", series_label="WTD anomalies")
         del members
         result.rename(output)
     print(f"Saved {ncell} cells and {int(cells.paired_months.sum())} paired cell-months to {output}")

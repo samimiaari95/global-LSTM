@@ -70,4 +70,10 @@ python -m LSTM_model.data.conusmonthly_evaluation
 
 The evaluator checks all 100 predictions against the prepared dates and cell order. It averages daily predictions within each month, then computes separate calendar-month z-scores for the observations and each member using the five-year climatology and population standard deviation. It averages the member anomalies after standardization. Constant calendar months yield undefined anomalies.
 
-The default results are in `outputs/CONUSmonthly/evaluation/run_2020_2024/`. The run writes aligned NetCDF series, daily sample counts per month, per-cell RMSE, MAE, Pearson r, NSE and anomaly-specific KGE, time series, maps, CDFs and ensemble statistics plots. Add `--plot-cells 0 10` to limit individual figures or `--output` to choose a fresh result directory.
+The default output is `outputs/CONUSmonthly/evaluation/run_2020_2024/`. The [updated evaluation](outputs/CONUSmonthly/evaluation/run_2020_2024_maps_and_ranks/) was written to a separate directory. Each run writes aligned NetCDF series, daily sample counts per month, per-cell RMSE, MAE, Pearson r, NSE and anomaly-specific KGE, metric maps, CDFs and ensemble statistics plots.
+
+- `rank_histogram.png` pools observations across all evaluated cells and months. A cell-month contributes when the observed anomaly and all 100 member anomalies are finite. Ranks 0–100 count the members below the observation, with ties broken reproducibly at random. A dashed line shows the count expected under a uniform rank distribution.
+- `timeseries/` and `cell_r2/` label the plotted values as WTD anomalies and show each cell in a small CONUS map. The example time series also show cell locations.
+- `well_locations_and_grid_cells.png` shows the original well locations on the left and the assigned ERA5-Land cell centres on the right. It includes all 1,005 qualifying wells and 801 assigned cells, with the 984 wells and 784 cells used for evaluation distinguished from the observation-only locations. For a standalone prepared bundle, place the full `well_era5land_cells.csv` in its parent directory. Otherwise the figure uses the bundle's retained well inventory.
+
+Add `--plot-cells 0 10` to limit individual figures. The pooled rank histogram and the coverage figure still use the full applicable dataset. Use `--output` to choose a fresh result directory.

@@ -1,6 +1,6 @@
 # Monthly verification of ERA5-Land groundwater predictions
 
-Run from `global_TL/spatio-temporal-LSTM` on JURECA. The script reads the completed predictions and runs on one CPU process. It uses NumPy, pandas, SciPy, xarray, Matplotlib, pyshp, Shapely and the environment’s `nccopy` binary. It calls the project KGE utility, whose configuration imports PyTorch. Computation and rendering use CPU arrays and the Agg backend.
+Run from `global_TL/global-LSTM` on JURECA. The script reads the completed predictions and runs on one CPU process. It uses NumPy, pandas, SciPy, xarray, Matplotlib, pyshp, Shapely and the environment’s `nccopy` binary. It calls the project KGE utility, whose configuration imports PyTorch. Computation and rendering use CPU arrays and the Agg backend.
 
 ```bash
 source /p/project1/cslts/miaari1/python_scripts/DailyScriptBox/envs/loadenv.JURECA-DC_JUWELS_2025_GCC-OpenMPI_Std-Py-AI.ini
@@ -13,7 +13,7 @@ Results go under `outputs/EU_74_-48_69_20/validation_ERA5/observation_anomalies/
 ## Inputs and alignment
 
 - Member IDs 0–99 each supply the final `sim_ERA5on_observed_valid_pixels_1996_2012.npy` and matching JSON under `validation_ERA5/ensemble_400px/400px_member_<id>/`. A missing member, incompatible metadata, or nonfinite daily output stops the run.
-- `inputs/EU_74_-48_69_20/era5land_inputs_1996_2012/` supplies the calendar, pixel ordering, geographic coordinates in the staged static predictors, and preprocessing metadata. Keep the preparation and prediction files together in their original locations. The sidecars identify the date and pixel files by absolute path.
+- `inputs/EU_74_-48_69_20/era5land_inputs_1996_2012/` supplies the calendar, pixel ordering, geographic coordinates in the staged static predictors, and preprocessing metadata. The sidecars identify the date and pixel files by absolute path. The script accepts paths written before the project directory was renamed to `global-LSTM`.
 - The observation source is the merged NetCDF named in `preprocessing.json`. The script subtracts the stored center offset from model row and column to index the observation grid. It matches decoded observation timestamps by year and month. Map markers use the model’s geographic longitude and latitude. The NetCDF’s one-dimensional coordinates are rotated grid axes.
 - The evaluation unit is a model cell. Multiple stations can contribute to a single cell. The merged file preserves existing finite grid values and fills gaps with available station anomalies averaged within the cell.
 
@@ -33,13 +33,15 @@ Results go under `outputs/EU_74_-48_69_20/validation_ERA5/observation_anomalies/
 | --- | --- |
 | `monthly_series.nc` | Monthly ensemble mean in native WTD units, standardized ensemble mean, observed anomaly, across-member sample SD, dates, contributing day counts, cell indices and coordinates. |
 | `cell_metrics.csv`, `metric_summary.csv` | Cell scores, ensemble statistics, coverage and coordinates, plus equal-cell descriptive summaries of the five metrics. Undefined values are blank. |
-| `timeseries/cell_NNNN.png` | One file per selected cell. Gray transparent lines show individual standardized members, blue shows observations and orange shows the ensemble mean. The title gives all five scores. Gaps mark undefined values. |
-| `cell_r2/cell_NNNN.png` | One observed-versus-ensemble-mean scatter per cell, with predictive R², paired-month count and a 1:1 reference for finite pairs. A cell with no pairs still receives a labeled figure. Cell IDs in both folders match the CSV index. |
-| `metric_maps/<metric>.png` | Separate map for each of the five scores. Both panels use the same colors and limits. The left panel covers the full study area. The right spans 6.5°W–17.5°E and 41°N–56.25°N, covering England, metropolitan France, Germany, Austria and Switzerland. Pearson r, NSE and KGE use −1 to 1. Error scales saturate at the full-area 98th percentile. Exact scores are in the CSV. |
+| `timeseries/cell_NNNN.png` | One file per selected cell. Gray transparent lines show individual standardized members, blue shows observations and orange shows the ensemble mean. The title gives all five scores, the y-axis reads WTD anomalies, and a locator map highlights the cell. Gaps mark undefined values. |
+| `cell_r2/cell_NNNN.png` | One observed-versus-ensemble-mean scatter per cell, with predictive R², paired-month count and a 1:1 reference for finite pairs. The axes identify observed and ensemble-mean WTD anomalies, and a locator map highlights the cell. A cell with no pairs still receives a labeled figure. Cell IDs in both folders match the CSV index. |
+| `metric_maps/<metric>.png` | Separate map for each of the five scores. Both panels use the same colors and limits. The left panel covers the full study area. The right spans 6.5°W–19.5°E and 43.85°N–56.25°N, including Czechia and keeping Spain outside the extent. The southern edge also crops southern France. Pearson r, NSE and KGE use −1 to 1. Error scales saturate at the full-area 98th percentile. Exact scores are in the CSV. |
 | `statistics_maps.png`, `metric_cdfs.png` | Maps of paired coverage, spread and temporal SD, and empirical cumulative distributions of cell scores. |
-| `statistics_vs_metrics.png` | One point per scored cell in each panel. Rows give the performance metric on the vertical axis. Columns give ensemble variance, IQR, pairwise r, mean ensemble SD and MAD on the horizontal axis. |
+| `statistics_vs_metrics.png` | One point per scored cell in each panel. Rows give the performance metric on the vertical axis. Columns give ensemble variance, IQR, pairwise r, mean ensemble SD and MAD on the horizontal axis. The NSE and KGE rows omit points below −1 and −1.41 respectively. CSVs and other plots use the full scores. |
 | `paired_anomalies.png` | Global observed-versus-ensemble-mean density, with logarithmically colored cell-month counts, predictive R² and a 1:1 reference. |
-| `example_series.png` | Three example series selected by cell RMSE rank. |
+| `example_series.png` | Three example series selected by cell RMSE rank, each with a locator map. |
+| `well_locations_and_grid_cells.png` | Valid wells from the station mapping CSV next to their unique assigned model grid-cell centers. The CSV lists wells with a complete record over the study period. Some observations entered the merged NetCDF as pre-gridded values without well coordinates in this CSV. |
+| `rank_histogram.png` | One pooled histogram over all cell-months with finite observations and all 100 member anomalies. It has 101 ranks, from 0 to 100, and a uniform-count reference. Exact ties use uniform random ranks among the possible tied positions with a fixed seed. |
 
 The default run generates both individual PNGs for **every** selected cell. To inspect selected examples more quickly, append e.g. `--plot-cells 0 174 800`. This limits only the two per-cell figure folders. All summary figures, scores and monthly outputs still use the full ensemble and all cells.
 
@@ -48,3 +50,5 @@ The default run generates both individual PNGs for **every** selected cell. To i
 [Updated sample outputs](outputs/EU_74_-48_69_20/validation_ERA5/observation_anomalies/updated_sample/) contain the full 100-member analysis for 1,753 cells, all five two-panel metric maps, and both individual figures for 12 cells. The sample includes cells 174, 1630 and 1661, which had observations but no defined full-ensemble anomaly. The other 1,750 cells contributed 357,000 paired cell-months. Pooled R² was 0.111 and median cell KGE was 0.458. An independent calculation from the 100 daily files reproduced KGE and the five ensemble statistics for cell 800.
 
 The sample run took 66 seconds on CPU, including 3.5 seconds to render 24 individual PNGs. At that rate the default run with 3,506 individual PNGs would take about 9–10 minutes in total. Actual wall time depends on filesystem load.
+
+The [EU plot update run](outputs/EU_74_-48_69_20/validation_ERA5/observation_anomalies/eu_plot_update_20261125/) generated all summary figures and both individual plots for cells 0, 174, 800, 1630 and 1661. The station mapping contains 4,339 wells assigned to 1,502 distinct model cells. The pooled histogram uses 357,000 cell-months across the 1,750 cells with defined ensemble anomalies.

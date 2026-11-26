@@ -18,17 +18,22 @@ from LSTM_model.data.postprocess_era5land_observations import (
     MEMBERS, STATS, ensemble_statistics, figures,
 )
 from LSTM_model.data.predict_era5land_observations import validate_prepared_inputs
-from matplotlib.colors import Normalize, SymLogNorm
+from matplotlib.colors import LogNorm, SymLogNorm
 
 DAILY_INPUTS = Path("inputs/CONUSdaily")
 DAILY_OUTPUTS = Path("outputs/CONUSdaily")
 SOURCE_PREPARED = DAILY_INPUTS / "source" / "prepared"
 SOURCE_PREDICTIONS = DAILY_OUTPUTS / "source" / "predictions"
 START, END = "2022-03-01", "2024-02-28"
-PLOT_COLUMNS = dict(rmse_m="RMSE", mae_m="MAE", bias_m="Bias", pearson_r="Pearson_r", nse="NSE")
+PLOT_COLUMNS = dict(rmse_m="RMSE", mae_m="MAE", absolute_mean_bias_m="Absolute_mean_bias",
+                    pearson_r="Pearson_r", nse="NSE", kge="KGE")
 METRIC_LABELS = {
-    "RMSE": "RMSE (m)", "MAE": "MAE (m)", "Bias": "Bias (m)", "Pearson_r": "Pearson r", "NSE": "NSE",
+    "RMSE": "RMSE (m)", "MAE": "MAE (m)", "Absolute_mean_bias": "Absolute mean bias (m)",
+    "Pearson_r": "Pearson r", "NSE": "NSE", "KGE": "KGE",
 }
+LOG_METRICS = ("RMSE", "MAE", "Absolute_mean_bias")
+LOG_STATISTICS = ("Ensemble_variance", "IQR", "Ensemble_SD", "MAD", "RMS_spread", "obs_SD", "prediction_SD")
+SYMLOG_METRICS = ("NSE", "KGE")
 STATISTIC_LABELS = {
     "Ensemble_variance": "Ensemble variance (m²)", "IQR": "Ensemble IQR (m)",
     "Pairwise_r": "Mean pairwise Pearson r", "Ensemble_SD": "Ensemble SD (m)",
@@ -174,37 +179,57 @@ def ensemble(prepared, predictions, shape):
 
 def scores(observed, predicted):
     residual = predicted - observed
-    obs_centered = observed - observed.mean(axis=0)
-    pred_centered = predicted - predicted.mean(axis=0)
+    obs_mean = observed.mean(axis=0)
+    pred_mean = predicted.mean(axis=0)
+    obs_centered = observed - obs_mean
+    pred_centered = predicted - pred_mean
     obs_variance = np.square(obs_centered).sum(axis=0)
     pred_variance = np.square(pred_centered).sum(axis=0)
     correlation_denominator = np.sqrt(obs_variance * pred_variance)
     sse = np.square(residual).sum(axis=0)
     missing = np.full(observed.shape[1], np.nan)
+    obs_varies = (np.ptp(observed, axis=0) > 0) & (obs_variance > 0)
+    pred_varies = np.ptp(predicted, axis=0) > 0
+    r = np.divide((obs_centered * pred_centered).sum(axis=0), correlation_denominator,
+                  out=missing.copy(), where=obs_varies & pred_varies & (correlation_denominator > 0))
+    alpha = np.sqrt(np.divide(pred_variance, obs_variance, out=missing.copy(), where=obs_varies))
+    beta = np.divide(pred_mean, obs_mean, out=missing.copy(), where=obs_mean != 0)
+    mean_bias = residual.mean(axis=0)
     return {
         "rmse_m": np.sqrt(sse / len(observed)),
         "mae_m": np.abs(residual).mean(axis=0),
-        "bias_m": residual.mean(axis=0),
-        "pearson_r": np.divide((obs_centered * pred_centered).sum(axis=0), correlation_denominator,
-                               out=missing.copy(), where=correlation_denominator > 0),
-        "nse": 1 - np.divide(sse, obs_variance, out=missing, where=obs_variance > 0),
+        "bias_m": mean_bias,
+        "absolute_mean_bias_m": np.abs(mean_bias),
+        "pearson_r": r,
+        "nse": 1 - np.divide(sse, obs_variance, out=missing, where=obs_varies),
+        "kge": 1 - np.sqrt((r - 1)**2 + (alpha - 1)**2 + (beta - 1)**2),
     }
 
 
+def log_color_scale(values):
+    positive = values[values > 0]
+    if positive.empty:
+        return LogNorm(1, 10)
+    lower, upper = positive.min(), positive.max()
+    return LogNorm(lower, upper if upper > lower else lower * 10)
+
+
 def daily_figures(output, table, dates, observed, predicted, members, indices):
-    bias_limit = max(table.bias_m.abs().quantile(.98), 1e-6)
-    nse_limit = min(-1, table.nse.dropna().quantile(.02))
+    cells = table.rename(columns=PLOT_COLUMNS)
+    log_keys = (*LOG_METRICS, *LOG_STATISTICS)
+    axis_scales = {**dict.fromkeys(log_keys, "log"), **dict.fromkeys(SYMLOG_METRICS, "symlog")}
+    color_scales = {key: ("viridis", log_color_scale(cells[key]))
+                    for key in (*LOG_METRICS, "RMS_spread", "obs_SD", "prediction_SD")}
+    color_scales.update({key: ("viridis", SymLogNorm(1, vmin=min(-1, cells[key].min()), vmax=1))
+                         for key in SYMLOG_METRICS})
     figures(
-        output, table.rename(columns=PLOT_COLUMNS), dates, observed, predicted, members, indices,
+        output, cells, dates, observed, predicted, members, indices,
         period="day", value_label="WTD (m)", paired_filename="paired_wtd.png",
         metric_labels=METRIC_LABELS, statistic_labels=STATISTIC_LABELS,
-        member_interval=(5, 95), symlog_metrics=("NSE",),
+        axis_scales=axis_scales, show_example_members=True,
         map_options={
             "full": (-126, 23, -65, 51), "zoom": None, "coverage": "well_count",
-            "color_scales": {
-                "Bias": ("RdBu_r", Normalize(-bias_limit, bias_limit)),
-                "NSE": ("viridis", SymLogNorm(1, vmin=nse_limit, vmax=1)),
-            },
+            "color_scales": color_scales,
         },
     )
 

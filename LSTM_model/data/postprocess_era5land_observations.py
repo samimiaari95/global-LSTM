@@ -30,6 +30,8 @@ VALIDATION = PROJECT / "outputs" / REGION / "validation_ERA5"
 ENSEMBLE = VALIDATION / "ensemble_400px"
 NAME = "sim_ERA5on_observed_valid_pixels_1996_2012.npy"
 MEMBERS = 100
+EU_ZOOM = (-6.5, 43.85, 19.5, 56.25)
+EU_SCATTER_LIMITS = {"NSE": -1, "KGE": -1.41}
 METRICS = ["RMSE", "MAE", "Pearson_r", "NSE", "KGE"]
 STATS = ["Ensemble_variance", "IQR", "Pairwise_r", "Ensemble_SD", "MAD"]
 
@@ -63,14 +65,18 @@ def aggregate(dates, starts, counts, ncell):
     m2 = np.zeros(dims)
     valid = np.ones(dims, dtype=bool)
     members = np.empty((ncell, MEMBERS, len(starts)), dtype=np.float32)
+    # Existing EU sidecars predate the rename to global-LSTM.
+    legacy_prep = PROJECT.with_name("spatio-temporal-LSTM") / PREP.relative_to(PROJECT)
     for member in range(MEMBERS):
         path = ENSEMBLE / f"400px_member_{member}" / NAME
         info = json.loads(path.with_suffix(".json").read_text())
         daily = np.load(path, mmap_mode="r")
         if (info["member"] != member or daily.shape != (len(dates), ncell)
                 or list(daily.shape) != info["shape"]
-                or Path(info["target_dates_file"]).resolve() != PREP / "target_dates.npy"
-                or Path(info["selected_pixels_file"]).resolve() != PREP / "selected_pixels.npy"):
+                or Path(info["target_dates_file"]).resolve() not in
+                   (PREP / "target_dates.npy", legacy_prep / "target_dates.npy")
+                or Path(info["selected_pixels_file"]).resolve() not in
+                   (PREP / "selected_pixels.npy", legacy_prep / "selected_pixels.npy")):
             raise ValueError(f"Inconsistent prediction metadata: {path}")
         monthly = np.add.reduceat(daily, starts, axis=0, dtype=float) / counts[:, None]
         if not np.isfinite(monthly).all():
@@ -136,6 +142,86 @@ def save(fig, path, dpi=145):
     plt.close(fig)
 
 
+def country_borders(bounds):
+    borders = []
+    shp = PROJECT.parent / "ne_10m_admin_0_countries/ne_10m_admin_0_countries.shp"
+    with shapefile.Reader(str(shp)) as reader:
+        for feature in reader.iterShapes(bbox=bounds.bounds):
+            lines = shape(feature.__geo_interface__).boundary.simplify(.03).intersection(bounds)
+            for line in getattr(lines, "geoms", [lines]):
+                if line.geom_type == "LineString" and not line.is_empty:
+                    borders.append(np.asarray(line.coords))
+    return borders
+
+
+def spatial_axes(ax, borders, extent):
+    ax.add_collection(LineCollection(borders, colors=".65", linewidths=.45))
+    west, south, east, north = extent
+    ax.set(xlim=(west, east), ylim=(south, north))
+    ax.set_aspect(1 / np.cos(np.deg2rad((south + north) / 2)))
+
+
+def cell_location(ax, row, context):
+    borders, extent = context
+    spatial_axes(ax, borders, extent)
+    ax.scatter(row.longitude, row.latitude, s=23, color="#ae4120",
+               edgecolor="white", linewidth=.6, zorder=3)
+    ax.set(title="Cell location", xticks=[], yticks=[])
+
+
+def observation_locations(out, meta, cells):
+    source = Path(meta["observation_file"])
+    mapping = pd.read_csv(source.with_name(source.stem + "_station_mapping.csv"))
+    mapped = mapping.drop_duplicates(["tsmp_yindex", "tsmp_xindex"])
+    selected = cells.set_index(["model_y", "model_x"])
+    assigned = selected.reindex(pd.MultiIndex.from_frame(mapped[["tsmp_yindex", "tsmp_xindex"]]))
+    if assigned[["longitude", "latitude"]].isna().any().any():
+        raise ValueError("A mapped observation well is assigned outside the EU evaluation grid")
+
+    longitude = np.concatenate([mapping.lon, assigned.longitude])
+    latitude = np.concatenate([mapping.lat, assigned.latitude])
+    extent = (longitude.min()-2, latitude.min()-1, longitude.max()+2, latitude.max()+1)
+    borders = country_borders(box(*extent))
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5.5), constrained_layout=True)
+    for ax, x, y, title in [
+        (axes[0], mapping.lon, mapping.lat, f"Valid wells ({len(mapping):,})"),
+        (axes[1], assigned.longitude, assigned.latitude, f"Assigned grid cells ({len(assigned):,})"),
+    ]:
+        spatial_axes(ax, borders, extent)
+        ax.scatter(x, y, s=5, alpha=.65, linewidths=0, color="#165e91")
+        ax.set(title=title, xlabel="Longitude (°E)", ylabel="Latitude (°N)")
+    save(fig, out / "well_locations_and_grid_cells.png")
+
+
+def pooled_rank_counts(obs, members):
+    """Count observation ranks across complete cell-months, with seeded random ties."""
+    member_count = members.shape[1]
+    counts = np.zeros(member_count + 1, dtype=np.int64)
+    rng = np.random.default_rng(0)
+    for observed, ensemble in zip(obs.T, members):
+        valid = np.isfinite(observed) & np.isfinite(ensemble).all(axis=0)
+        observed = observed[valid]
+        ensemble = ensemble[:, valid]
+        lower = (ensemble < observed).sum(axis=0)
+        tied = (ensemble == observed).sum(axis=0)
+        ranks = lower + rng.integers(tied + 1)
+        counts += np.bincount(ranks, minlength=len(counts))
+    return counts
+
+
+def rank_histogram(out, obs, members):
+    counts = pooled_rank_counts(obs, members)
+    fig, ax = plt.subplots(figsize=(10, 4.4), constrained_layout=True)
+    ranks = np.arange(len(counts))
+    ax.bar(ranks, counts, color="#165e91")
+    ax.axhline(counts.mean(), color=".25", linestyle="--", label="Uniform reference")
+    ax.set(title=f"Pooled ensemble rank histogram ({counts.sum():,} cell-months)",
+           xlabel="Observation rank (0–100)",
+           ylabel="Cell-month count", xlim=(-1, len(counts)))
+    ax.legend()
+    save(fig, out / "rank_histogram.png")
+
+
 def maps(out, cells, *, full=None, zoom=(-6.5, 41.0, 17.5, 56.25),
          zoom_title="England and western–central Europe", coverage="paired_months",
          metric_labels=None, statistic_labels=None, color_scales=None):
@@ -145,14 +231,7 @@ def maps(out, cells, *, full=None, zoom=(-6.5, 41.0, 17.5, 56.25),
     color_scales = color_scales or {}
     full = full or (x.min()-2, y.min()-1, x.max()+2, y.max()+1)
     bounds = box(*full) if zoom is None else box(*full).union(box(*zoom)).envelope
-    borders = []
-    shp = PROJECT.parent / "ne_10m_admin_0_countries/ne_10m_admin_0_countries.shp"
-    with shapefile.Reader(str(shp)) as reader:
-        for feature in reader.iterShapes(bbox=bounds.bounds):
-            lines = shape(feature.__geo_interface__).boundary.simplify(.03).intersection(bounds)
-            for line in getattr(lines, "geoms", [lines]):
-                if line.geom_type == "LineString" and not line.is_empty:
-                    borders.append(np.asarray(line.coords))
+    borders = country_borders(bounds)
 
     def draw(ax, key, extent, title):
         ax.add_collection(LineCollection(borders, colors=".65", linewidths=.45))
@@ -215,9 +294,10 @@ def plot_members(ax, dates, members):
 
 
 def cell_figures(out, cells, dates, obs, pred, members, indices, *,
-                 metric_labels=None, value_label="standardized anomaly"):
+                 metric_labels=None, value_label="standardized anomaly", location_map=None,
+                 series_label=None):
     metric_labels = metric_labels or {key: key for key in METRICS}
-    series_label = "Std. anomaly" if value_label == "standardized anomaly" else value_label
+    series_label = series_label or ("Std. anomaly" if value_label == "standardized anomaly" else value_label)
     ts = out / "timeseries"
     scatter = out / "cell_r2"
     ts.mkdir()
@@ -228,6 +308,9 @@ def cell_figures(out, cells, dates, obs, pred, members, indices, *,
         title = f"Cell {i}   ({row.latitude:.2f}°, {row.longitude:.2f}°)"
         fig, ax = plt.subplots(figsize=(9, 3.4))
         fig.subplots_adjust(top=.78, bottom=.18)
+        if location_map is not None:
+            fig.subplots_adjust(right=.77)
+            cell_location(fig.add_axes([.79, .19, .19, .56]), row, location_map)
         plot_members(ax, dates, members[i])
         ax.plot(dates, obs[:, i], label="Observation", color="#165e91", lw=1.3)
         ax.plot(dates, pred[:, i], label="Ensemble mean", color="#ae4120", lw=1.4)
@@ -241,6 +324,10 @@ def cell_figures(out, cells, dates, obs, pred, members, indices, *,
         paired = np.isfinite(obs[:, i]) & np.isfinite(pred[:, i])
         fig, ax = plt.subplots(figsize=(5, 4.3))
         fig.subplots_adjust(left=.17, bottom=.14)
+        if location_map is not None:
+            fig.set_size_inches(7.5, 4.3)
+            fig.subplots_adjust(left=.12, right=.70)
+            cell_location(fig.add_axes([.73, .19, .24, .56]), row, location_map)
         paired_plot(ax, obs[paired, i], pred[paired, i], row.NSE, value_label=value_label)
         ax.set_title(title)
         save(fig, scatter / name, dpi=110)
@@ -257,10 +344,12 @@ def scale_metric_axis(ax, direction, values, scale):
 
 def figures(out, cells, periods, obs, pred, members, indices, *, period="month", map_options=None,
             metric_labels=None, statistic_labels=None, value_label="standardized anomaly",
-            paired_filename="paired_anomalies.png", axis_scales=None, show_example_members=False):
+            paired_filename="paired_anomalies.png", axis_scales=None, show_example_members=False,
+            scatter_minimums=None, location_map=None, series_label=None):
     metric_labels = metric_labels or {key: key for key in METRICS}
     statistic_labels = statistic_labels or {}
     axis_scales = axis_scales or {}
+    scatter_minimums = scatter_minimums or {}
     maps(out, cells, metric_labels=metric_labels, statistic_labels=statistic_labels,
          **(map_options or {}))
     fig, axes = plt.subplots(2, 3, figsize=(11, 6), constrained_layout=True)
@@ -283,10 +372,15 @@ def figures(out, cells, periods, obs, pred, members, indices, *, period="month",
             for column in (stat, key):
                 if axis_scales.get(column) == "log":
                     pairs = pairs.loc[pairs[column] > 0]
+            minimum = scatter_minimums.get(key)
+            if minimum is not None:
+                pairs = pairs.loc[pairs[key] >= minimum]
             ax.scatter(pairs[stat], pairs[key], s=3, alpha=.35)
             ax.set(xlabel=statistic_labels.get(stat, stat.replace("_", " ")), ylabel=label)
             scale_metric_axis(ax, "x", cells[stat], axis_scales.get(stat))
             scale_metric_axis(ax, "y", cells[key], axis_scales.get(key))
+            if minimum is not None:
+                ax.set_ylim(minimum, 1.02)
     save(fig, out / "statistics_vs_metrics.png")
 
     fig, ax = plt.subplots(figsize=(6, 5), constrained_layout=True)
@@ -301,9 +395,11 @@ def figures(out, cells, periods, obs, pred, members, indices, *, period="month",
     ranked = cells.RMSE.dropna().sort_values()
     fig, axes = plt.subplots(3, 1, figsize=(11, 7), constrained_layout=True)
     dates = periods.to_timestamp() if isinstance(periods, pd.PeriodIndex) else periods
-    series_label = "Std. anomaly" if value_label == "standardized anomaly" else value_label
+    series_label = series_label or ("Std. anomaly" if value_label == "standardized anomaly" else value_label)
     for ax, q in zip(axes, [.1, .5, .9]):
         i = ranked.index[round(q*(len(ranked)-1))]
+        if location_map is not None:
+            cell_location(ax.inset_axes([1.025, .05, .17, .85]), cells.loc[i], location_map)
         if show_example_members:
             plot_members(ax, dates, members[i])
         ax.plot(dates, obs[:, i], label="Observation", lw=1)
@@ -314,7 +410,7 @@ def figures(out, cells, periods, obs, pred, members, indices, *, period="month",
     save(fig, out / "example_series.png")
     start = monotonic()
     cell_figures(out, cells, dates, obs, pred, members, indices, metric_labels=metric_labels,
-                 value_label=value_label)
+                 value_label=value_label, location_map=location_map, series_label=series_label)
     print(f"Rendered both figures for {len(indices)} cells in {monotonic()-start:.1f} s", flush=True)
 
 
@@ -370,7 +466,15 @@ def main():
         ds.attrs.update(members=MEMBERS, observation_file=meta["observation_file"],
                         anomaly_baseline="Member-specific calendar-month z-score, 1996–2012, ddof=0")
         ds.to_netcdf(result / "monthly_series.nc", engine="scipy")
-        figures(result, cells, months, obs, pred, members, indices)
+        observation_locations(result, meta, cells)
+        rank_histogram(result, obs, members)
+        extent = (cells.longitude.min()-2, cells.latitude.min()-1,
+                  cells.longitude.max()+2, cells.latitude.max()+1)
+        location_map = (country_borders(box(*extent)), extent)
+        figures(result, cells, months, obs, pred, members, indices,
+                map_options={"zoom": EU_ZOOM, "zoom_title": "England and central Europe"},
+                scatter_minimums=EU_SCATTER_LIMITS, location_map=location_map,
+                value_label="WTD anomalies", series_label="WTD anomalies")
         result.rename(out)
     print(f"Saved {len(cells)} cells and {int(cells.paired_months.sum())} paired cell-months to {out}")
 
