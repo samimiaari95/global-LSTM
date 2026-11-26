@@ -6,6 +6,7 @@ __pycache__/
 # agent settings folders
 .github/
 .vscode/
+AGENTS.md
 
 # C extensions
 *.so
