@@ -1,11 +1,11 @@
 #!/bin/bash
 
-cd xxxx
-source xxxx
+REPOSITORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+source /p/project1/cslts/miaari1/python_scripts/DailyScriptBox/envs/loadenv.JURECA-DC_JUWELS_2025_GCC-OpenMPI_Std-Py-AI.ini
 
 # Directory containing the NetCDF files
-INPUT_DIR="xxxx"
-GRID_FILE="xxxx"
+INPUT_DIR="${REPOSITORY}/inputs/EU_74_-48_69_20/raw/ERA5-Land"
+GRID_FILE="${REPOSITORY}/inputs/EU_74_-48_69_20/raw/ERA5-Land/regridded_to_EUR11/grids_and_weights/EUR11_TSMP_grid.txt"
 
 # Loop over all .nc files in the directory
 for file in "$INPUT_DIR"/daily_mean_d2m_t2m_swvl3/*.nc; do

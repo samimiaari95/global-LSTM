@@ -20,16 +20,15 @@ predictions="$output/predictions"
 
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
     script="$(realpath "${BASH_SOURCE[0]}")"
-    cd "$(dirname "$script")"
+    cd "$(dirname "$script")/../.."
     test -f "$prepared/preprocessing.json"
     mkdir -p "$output/logs"
-    exec sbatch "$@" --clusters=jureca \
+    exec sbatch "$@" --clusters=jureca --chdir="$PWD" \
         --output="$output/logs/prediction_%j.out" --error="$output/logs/prediction_%j.err" \
         "$script"
 fi
 
-cd "${SLURM_SUBMIT_DIR:?The Slurm submission directory is required}"
-if [[ ! -f "$prepared/preprocessing.json" ]]; then
+if [[ ! -f LSTM_model/model/config.py || ! -f "$prepared/preprocessing.json" ]]; then
     printf 'Missing %s/%s/preprocessing.json. Submit from the repository root.\n' "$PWD" "$prepared" >&2
     exit 1
 fi
@@ -44,7 +43,7 @@ if ! flock -n 9; then
     exit 1
 fi
 
-for ((member=28; member<100; member++)); do
+for ((member=0; member<100; member++)); do
     printf -v member_directory '%s/member_%03d' "$predictions" "$member"
     if [[ -s "$member_directory/daily_wtd.npy" && -s "$member_directory/daily_wtd.json" ]]; then
         printf 'Member %03d already has output, skipping\n' "$member"
@@ -53,7 +52,7 @@ for ((member=28; member<100; member++)); do
     printf 'Running ensemble member %03d\n' "$member"
     srun env -u CUDA_VISIBLE_DEVICES python -m torch.distributed.run \
         --standalone --nnodes=1 --nproc-per-node=4 \
-        --module LSTM_model.data.predict_era5land_observations \
+        --module LSTM_model.model.predict_era5land_observations \
         --member "$member" \
         --prepared-directory "$prepared" \
         --output-directory "$predictions" \

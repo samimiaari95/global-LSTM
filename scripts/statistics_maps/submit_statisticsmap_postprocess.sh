@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-REPOSITORY=xxxxx
+REPOSITORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 STATISTICS_ROOT="${REPOSITORY}/outputs/EU_74_-48_69_20/statisticsEUmap"
 
 if [[ "$#" -ne 1 ]]; then
@@ -89,8 +89,8 @@ else
 fi
 
 POSTPROCESS_JOB_ID=$(
-    sbatch "${SBATCH_ARGS[@]}" \
-        "${REPOSITORY}/job_statisticsmap_postprocess.sh"
+    sbatch --chdir="$REPOSITORY" "${SBATCH_ARGS[@]}" \
+        "${REPOSITORY}/scripts/statistics_maps/job_statisticsmap_postprocess.sh"
 )
 POSTPROCESS_JOB_ID="${POSTPROCESS_JOB_ID%%;*}"
 

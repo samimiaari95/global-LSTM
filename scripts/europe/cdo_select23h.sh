@@ -1,7 +1,9 @@
 #!/bin/bash
 
+REPOSITORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+
 # Directory containing the NetCDF files
-INPUT_DIR="xxxxxx"
+INPUT_DIR="${REPOSITORY}/inputs/EU_74_-48_69_20/raw/ERA5-Land"
 OUTPUT_DIR="${INPUT_DIR}/daily_23h"
 mkdir -p "$OUTPUT_DIR"
 

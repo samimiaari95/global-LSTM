@@ -7,18 +7,30 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=128
-#SBATCH --output=/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/outputs/EU_74_-48_69_20/validation_ERA5/obspixelsera5wtdlogs/era5land-wtd-out.%j
-#SBATCH --error=/p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM/outputs/EU_74_-48_69_20/validation_ERA5/obspixelsera5wtdlogs/era5land-wtd-err.%j
 #SBATCH --gres=gpu:4
 #SBATCH --partition=dc-gpu
 #SBATCH --time=05:00:00
 #SBATCH --mail-user=s.miaari@fz-juelich.de
 #SBATCH --mail-type=ALL
 
-set -euo pipefail
+set -eo pipefail
 
-cd /p/project1/cslts/miaari1/python_scripts/global_TL/spatio-temporal-LSTM
+if [[ -z ${SLURM_JOB_ID:-} ]]; then
+    script="$(realpath "${BASH_SOURCE[0]}")"
+    cd "$(dirname "$script")/../.."
+    logs=outputs/EU_74_-48_69_20/validation_ERA5/obspixelsera5wtdlogs
+    mkdir -p "$logs"
+    exec sbatch "$@" --chdir="$PWD" \
+        --output="$logs/era5land-wtd-out.%j" --error="$logs/era5land-wtd-err.%j" \
+        "$script"
+fi
+
+if [[ ! -f LSTM_model/model/config.py ]]; then
+    echo "Submit from the repository root or pass sbatch --chdir=/path/to/global-LSTM." >&2
+    exit 1
+fi
 source /p/project1/cslts/miaari1/python_scripts/DailyScriptBox/envs/loadenv.JURECA-DCadapted_JUWELS_2025_GCC-OpenMPI_Std-Py-AI.ini
+set -u
 
 if [[ $# -ne 0 ]]; then
     echo "Usage: sbatch $0" >&2
@@ -44,7 +56,7 @@ for ens_member in {0..99}; do
         --rdzv_id="${SLURM_JOB_ID}_${ens_member}" \
         --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
         --rdzv_backend=static \
-        -m LSTM_model.data.predict_era5land_observations \
+        -m LSTM_model.model.predict_era5land_observations \
         --member "$ens_member" \
         --expected-world-size 4
     echo "[$(date '+%F %T')] Finished ensemble member $ENS_MEMBER"

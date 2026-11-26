@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-REPOSITORY=xxxxx
+REPOSITORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 STATISTICS_ROOT="${REPOSITORY}/outputs/EU_74_-48_69_20/statisticsEUmap"
 
 if [[ "$#" -ne 1 ]]; then
@@ -63,8 +63,8 @@ for MEMBER_INDEX in {0..99}; do
         SBATCH_ARGS+=(--dependency="afterok:${PREPROCESS_JOB_ID}")
     fi
 
-    JOB_ID=$(sbatch "${SBATCH_ARGS[@]}" \
-        "${REPOSITORY}/job_statisticsmap_era5land_array.sh")
+    JOB_ID=$(sbatch --chdir="$REPOSITORY" "${SBATCH_ARGS[@]}" \
+        "${REPOSITORY}/scripts/statistics_maps/job_statisticsmap_era5land_array.sh")
     JOB_ID="${JOB_ID%%;*}"
     if [[ ! "$JOB_ID" =~ ^[0-9]+$ ]]; then
         echo "Slurm returned an invalid job ID for member ${MEMBER_INDEX}: ${JOB_ID}" >&2

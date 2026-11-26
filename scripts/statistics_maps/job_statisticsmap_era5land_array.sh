@@ -1,30 +1,38 @@
 #!/bin/bash -x
-# author: xxxx
-# e-mail: xxxxx
+# author: Sami Miaari
+# e-mail: s.miaari@fz-juelich.de
 
 #SBATCH --job-name=statsmap_member
-#SBATCH --account=xxxx
+#SBATCH --account=jicg41
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
-#SBATCH --partition=xxxx
+#SBATCH --partition=dc-gpu
 #SBATCH --time=02:00:00
 #SBATCH --gres=gpu:4
-#SBATCH --output=member_%j.out
-#SBATCH --error=member_%j.err
-#SBATCH --mail-user=xxxxx
+#SBATCH --mail-user=s.miaari@fz-juelich.de
 #SBATCH --mail-type=ALL
 
-set -euo pipefail
+set -eo pipefail
 
-cd xxxxx
-source xxxxx
-  
+if [[ -n ${SLURM_JOB_ID:-} ]]; then
+    REPOSITORY="$PWD"
+else
+    REPOSITORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+fi
+if [[ ! -f "$REPOSITORY/LSTM_model/model/config.py" ]]; then
+    echo "Submit from the repository root or pass sbatch --chdir=/path/to/global-LSTM." >&2
+    exit 1
+fi
+cd "$REPOSITORY"
+source /p/project1/cslts/miaari1/python_scripts/DailyScriptBox/envs/loadenv.JURECA-DCadapted_JUWELS_2025_GCC-OpenMPI_Std-Py-AI.ini
+set -u
+
 export OMP_NUM_THREADS=4
 export MKL_NUM_THREADS=4
 export NCCL_SOCKET_IFNAME=ib0
 
-STATISTICS_ROOT=xxxxx
+STATISTICS_ROOT="${REPOSITORY}/outputs/EU_74_-48_69_20/statisticsEUmap"
 
 if [[ "$#" -gt 1 ]]; then
   echo "Usage: sbatch $0 [run_name]" >&2
@@ -66,7 +74,7 @@ srun env -u CUDA_VISIBLE_DEVICES torchrun \
   --standalone \
   --nnodes=1 \
   --nproc-per-node=4 \
-  --module LSTM_model.data.predict_era5land_statisticsmap \
+  --module LSTM_model.statistics_maps.predict_era5land_statisticsmap \
   --output-root "$STATISTICS_ROOT" \
   --run-name "$RUN_NAME" \
   --members "$MEMBER_INDEX" \

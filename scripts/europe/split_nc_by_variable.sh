@@ -1,13 +1,15 @@
 #!/bin/bash
 
+REPOSITORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+
 # Directory containing NetCDF files
-DIR="xxxxx"
+DIR="${REPOSITORY}/inputs/EU_74_-48_69_20/raw/ERA5-Land"
 
 # List of variables to extract
 VARS=("t2m" "d2m" "swvl3")
 
-if [[ -z "$DIR" ]]; then
-    echo "Usage: $0 <directory_with_nc_files>"
+if [[ ! -d "$DIR" ]]; then
+    echo "NetCDF input directory is missing: $DIR"
     exit 1
 fi
 

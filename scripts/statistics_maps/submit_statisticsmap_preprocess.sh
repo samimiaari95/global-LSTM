@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-REPOSITORY=xxxxx
+REPOSITORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 STATISTICS_ROOT="${REPOSITORY}/outputs/EU_74_-48_69_20/statisticsEUmap"
 
 if [[ "$#" -gt 1 ]]; then
@@ -26,11 +26,11 @@ mkdir "$RUN_DIR"
 mkdir "${RUN_DIR}/logs"
 
 PREPROCESS_JOB_ID=$(
-    sbatch --parsable \
+    sbatch --chdir="$REPOSITORY" --parsable \
         --export="ALL,RUN_NAME=${RUN_NAME}" \
         --output="${RUN_DIR}/logs/preprocess_%j.out" \
         --error="${RUN_DIR}/logs/preprocess_%j.err" \
-        "${REPOSITORY}/job_statisticsmap_preprocess.sh"
+        "${REPOSITORY}/scripts/statistics_maps/job_statisticsmap_preprocess.sh"
 )
 PREPROCESS_JOB_ID="${PREPROCESS_JOB_ID%%;*}"
 

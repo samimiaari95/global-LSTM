@@ -1,30 +1,38 @@
 #!/bin/bash -x
-# author: xxxxx
-# e-mail: xxxxx
+# author: Sami Miaari
+# e-mail: s.miaari@fz-juelich.de
 
 #SBATCH --job-name=statsmap_postprocess
-#SBATCH --account=xxxx
+#SBATCH --account=jibg36
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --partition=xxxx
+#SBATCH --partition=batch
 #SBATCH --time=18:00:00
-#SBATCH --output=postprocess_%j.out
-#SBATCH --error=postprocess_%j.err
-#SBATCH --mail-user=xxxxx
+#SBATCH --mail-user=s.miaari@fz-juelich.de
 #SBATCH --mail-type=ALL
 
-set -euo pipefail
+set -eo pipefail
 
-cd xxxx
-source xxxx
+if [[ -n ${SLURM_JOB_ID:-} ]]; then
+    REPOSITORY="$PWD"
+else
+    REPOSITORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+fi
+if [[ ! -f "$REPOSITORY/LSTM_model/model/config.py" ]]; then
+    echo "Submit from the repository root or pass sbatch --chdir=/path/to/global-LSTM." >&2
+    exit 1
+fi
+cd "$REPOSITORY"
+source /p/project1/cslts/miaari1/python_scripts/DailyScriptBox/envs/loadenv.JURECA-DCadapted_JUWELS_2025_GCC-OpenMPI_Std-Py-AI.ini
+set -u
 module load netcdf4-python
 
 export CUDA_VISIBLE_DEVICES=""
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-16}"
 export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-16}"
 
-STATISTICS_ROOT=xxxxx
+STATISTICS_ROOT="${REPOSITORY}/outputs/EU_74_-48_69_20/statisticsEUmap"
 if [[ "$#" -gt 1 ]]; then
     echo "Usage: sbatch $0 [run_name]" >&2
     exit 2
@@ -55,6 +63,6 @@ if [[ ! -f "${RUN_DIR}/metadata/preprocessing.json" ]]; then
 fi
 
 echo "Starting CPU output processing for ${RUN_NAME}"
-srun python -u -m LSTM_model.data.process_era5land_statisticsmap_outputs \
+srun python -u -m LSTM_model.statistics_maps.process_era5land_statisticsmap_outputs \
   --output-root "$STATISTICS_ROOT" \
   --run-name "$RUN_NAME"
