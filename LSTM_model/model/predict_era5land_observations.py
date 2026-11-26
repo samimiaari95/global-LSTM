@@ -9,6 +9,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, Tuple
+from uuid import uuid4
 
 import numpy as np
 import torch
@@ -26,6 +27,7 @@ from LSTM_model.model.config import (
     INPUTPATH,
     NUM_LAYERS,
     OUTPUT_SIZE,
+    OUTPUTPATH,
     AwesomeLSTM,
     ensemble_member_paths,
 )
@@ -38,6 +40,8 @@ TARGET_DAY_COUNT = 17 * 365
 EXPECTED_WORLD_SIZE = 4
 DEFAULT_PREPARED_DIRECTORY = Path(INPUTPATH) / "era5land_inputs_1996_2012"
 OUTPUT_FILENAME = "sim_ERA5on_observed_valid_pixels_1996_2012.npy"
+NATIVE_EUROPE_GRID = "native ERA5-Land 0.1 degree"
+NATIVE_EUROPE_OUTPUT = Path(OUTPUTPATH) / "era5land_arco_1996_2012" / "predictions"
 
 
 def log_progress(message: str, rank: int) -> None:
@@ -119,23 +123,24 @@ def validate_prepared_inputs(
     pixels = np.load(
         prepared_directory / "selected_pixels.npy", mmap_mode="r", allow_pickle=False
     )
-    if conus:
-        if metadata.get("region") != "CONUS":
-            raise ValueError("Expected CONUS preparation metadata")
+    native_europe = not conus and metadata.get("grid") == NATIVE_EUROPE_GRID
+    if conus and metadata.get("region") != "CONUS":
+        raise ValueError("Expected CONUS preparation metadata")
+    if conus or native_europe:
         context = np.load(prepared_directory / "context_dates.npy", allow_pickle=False)
         if (dates.ndim != 1 or not dates.size or dates.dtype.kind != "M"
                 or context.ndim != 1 or context.dtype.kind != "M"
                 or len(context) != LOOKBACK + len(dates) or np.isnat(context).any()
                 or not np.array_equal(context[LOOKBACK:], dates)):
-            raise ValueError("CONUS target dates must follow a complete lookback")
+            raise ValueError("Target dates must follow a complete lookback")
         expected = np.arange(context[0], context[-1] + np.timedelta64(1, "D"), dtype="datetime64[D]")
         expected = expected[~np.char.endswith(expected.astype(str), "-02-29")]
         if not np.array_equal(context, expected):
-            raise ValueError("CONUS context dates must form one continuous no-leap calendar")
+            raise ValueError("Context dates must form one continuous no-leap calendar")
         if (str(dates[0]) != metadata.get("target_start_date")
                 or str(dates[-1]) != metadata.get("target_end_date")):
-            raise ValueError("CONUS target dates disagree with preparation metadata")
-    elif dates.shape != (TARGET_DAY_COUNT,):
+            raise ValueError("Target dates disagree with preparation metadata")
+    if not conus and dates.shape != (TARGET_DAY_COUNT,):
         raise ValueError(
             f"Expected {TARGET_DAY_COUNT} target dates for 1996-2012; got "
             f"{dates.shape}"
@@ -152,9 +157,14 @@ def validate_prepared_inputs(
         raise ValueError(
             "Prepared selected_pixels.npy must contain non-empty (y, x) pairs"
         )
-    if conus and (len(pixels) != metadata.get("selected_pixel_count")
-                  or len(np.unique(pixels, axis=0)) != len(pixels)):
-        raise ValueError("CONUS pixel IDs must be unique and match the prepared cell count")
+    if conus or native_europe:
+        if len(pixels) != metadata.get("selected_pixel_count") or len(np.unique(pixels, axis=0)) != len(pixels):
+            raise ValueError("Pixel IDs must be unique and match the prepared cell count")
+    if native_europe:
+        shape = np.asarray(metadata["grid_shape"])
+        if (shape.shape != (2,) or pixels.dtype.kind not in "iu"
+                or np.any(pixels < 0) or np.any(pixels >= shape)):
+            raise ValueError("Pixel IDs must be integer indices inside the ERA5-Land grid")
     return len(dates), len(pixels)
 
 
@@ -169,7 +179,7 @@ def create_prediction_file(
     log_progress(f"preparing output array {temporary_path}", rank)
     if rank == 0:
         try:
-            prediction_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary_path.parent.mkdir(parents=True, exist_ok=True)
             if prediction_path.exists():
                 raise FileExistsError(
                     f"Refusing to overwrite predictions: {prediction_path}"
@@ -212,14 +222,22 @@ def finalize_prediction(
     log_progress("finalizing prediction array and metadata", rank)
     if rank == 0:
         metadata_path = prediction_path.with_suffix(".json")
-        temporary_metadata_path = Path(str(metadata_path) + ".partial")
+        staged_directory = temporary_path.parent != prediction_path.parent
+        temporary_metadata_path = (
+            temporary_path.parent / metadata_path.name if staged_directory
+            else metadata_path.with_suffix(".json.partial")
+        )
         try:
-            with temporary_metadata_path.open(
-                "w", encoding="utf-8"
-            ) as metadata_file:
+            with temporary_metadata_path.open("w", encoding="utf-8") as metadata_file:
                 json.dump(metadata, metadata_file, indent=2)
-            os.replace(temporary_path, prediction_path)
-            os.replace(temporary_metadata_path, metadata_path)
+            if staged_directory:
+                # Publish the native-grid array and metadata together.
+                if prediction_path.parent.exists():
+                    raise FileExistsError(prediction_path.parent)
+                temporary_path.parent.rename(prediction_path.parent)
+            else:
+                os.replace(temporary_path, prediction_path)
+                os.replace(temporary_metadata_path, metadata_path)
             LOGGER.info("Saved daily predictions to %s", prediction_path)
         except Exception as error:
             LOGGER.exception("Could not finalize the prediction outputs")
@@ -240,7 +258,15 @@ def run_prediction(
     run_started = time.monotonic()
     prepared_directory = args.prepared_directory.resolve()
     log_progress(f"validating prepared inputs in {prepared_directory}", rank)
-    conus = args.output_directory is not None
+    with (prepared_directory / "preprocessing.json").open(encoding="utf-8") as metadata_file:
+        prepared_metadata = json.load(metadata_file)
+    conus = prepared_metadata.get("region") == "CONUS"
+    native_europe = not conus and prepared_metadata.get("grid") == NATIVE_EUROPE_GRID
+    output_directory = args.output_directory
+    if native_europe and output_directory is None:
+        output_directory = NATIVE_EUROPE_OUTPUT
+    if conus and output_directory is None:
+        raise ValueError("CONUS prediction requires --output-directory")
     target_day_count, pixel_count = validate_prepared_inputs(prepared_directory, conus)
     target_dates = np.load(prepared_directory / "target_dates.npy", mmap_mode="r",
                            allow_pickle=False)
@@ -279,11 +305,17 @@ def run_prediction(
         rank,
     )
 
-    if conus:
-        prediction_path = args.output_directory / f"member_{args.member:03d}" / "daily_wtd.npy"
+    if output_directory is not None:
+        prediction_path = output_directory / f"member_{args.member:03d}" / "daily_wtd.npy"
     else:
         prediction_path = ENSEMBLE_PREDICTION_DIRECTORY / f"400px_member_{args.member}" / OUTPUT_FILENAME
-    temporary_path = Path(str(prediction_path) + ".partial")
+    if native_europe:
+        attempt = [uuid4().hex if rank == 0 else None]
+        torch.distributed.broadcast_object_list(attempt, src=0)
+        stage = prediction_path.parent.with_name(f".member_{args.member:03d}.{attempt[0]}.partial")
+        temporary_path = stage / prediction_path.name
+    else:
+        temporary_path = Path(str(prediction_path) + ".partial")
     create_prediction_file(
         temporary_path,
         prediction_path,
@@ -381,13 +413,19 @@ def run_prediction(
         "date_end": str(target_dates[-1]),
         "units": (
             "Native training WTD units, destandardized with this member's wtdmean/wtdstd"
-            if conus else "wtd_a units, destandardized with this member's wtdmean/wtdstd"
+            if conus or native_europe
+            else "wtd_a units, destandardized with this member's wtdmean/wtdstd"
         ),
         "feature_standardization": (
             "Per-member feature means and standard deviations from the "
             "training scaler pickle."
         ),
     }
+    if native_europe:
+        metadata.update(
+            quantity="water_table_depth", grid=NATIVE_EUROPE_GRID,
+            grid_shape=prepared_metadata["grid_shape"],
+        )
     finalize_prediction(temporary_path, prediction_path, metadata, rank)
     log_progress(
         f"total run time {(time.monotonic() - run_started) / 60:.1f} min",
@@ -419,7 +457,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--expected-world-size", type=int, default=EXPECTED_WORLD_SIZE
     )
     parser.add_argument("--output-directory", type=Path,
-                        help="Use the CONUS calendar and write separate member predictions here.")
+                        help="Write daily WTD arrays and metadata in per-member subdirectories here.")
     return parser
 
 

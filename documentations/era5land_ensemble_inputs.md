@@ -57,3 +57,17 @@ The `verify` stage checks date axes, finite feature arrays, all 100 feature-scal
 The observation mask contains 1,873 cells with 204 finite monthly anomalies each. The download sampled all 1,873 locations. All three daily model features have complete coverage at 1,861 cells. The 12 omitted cells have missing values in all three features beginning on 1 January 1995.
 
 The prepared dynamic array is `(3, 6570, 1861)` and the static array is `(5, 1861)`. The ensemble reads **`(11547505, 365, 8)`** per member through the batch iterator. All 100 training feature scalers passed validation.
+
+## Predict daily water table depth on JURECA
+
+Run this from the repository root on the JURECA login node.
+
+```bash
+bash scripts/europe/submit_era5land_prediction.sh
+```
+
+The launcher requests a single node with four GPUs on `dc-gpu` for five hours. It runs members 0–99 sequentially in the same allocation. Pass a Slurm option such as `--time=08:00:00` to change the wall time. Resubmitting the command skips members with both output files already present.
+
+Each member applies its fitted feature and target scalers. The output is daily water table depth in the native training units, with shape `(6205, 1861)` in date × cell order. Each member directory has a `daily_wtd.npy` array and `daily_wtd.json` metadata linking to `target_dates.npy` and `selected_pixels.npy` in the prepared bundle. The model omits February 29. Successful members publish both files together.
+
+Outputs go to `outputs/EU_74_-48_69_20/era5land_arco_1996_2012/predictions/member_NNN/`. Slurm writes one output log and one error log for the job in the sibling `logs/` directory.
