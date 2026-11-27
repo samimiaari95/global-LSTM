@@ -7,7 +7,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
-from matplotlib.colors import LogNorm, Normalize
+from matplotlib.colors import Normalize
 import numpy as np
 import pandas as pd
 import shapefile
@@ -124,12 +124,8 @@ def rank_histogram(out, obs, members):
 
 
 def maps(out, cells, *, full=None, zoom=(-6.5, 41.0, 17.5, 56.25),
-         zoom_title="England and western–central Europe", coverage="paired_months",
-         metric_labels=None, statistic_labels=None, color_scales=None):
+         zoom_title="England and western–central Europe"):
     x, y = cells.longitude, cells.latitude
-    metric_labels = metric_labels or {key: key for key in METRICS}
-    statistic_labels = statistic_labels or {}
-    color_scales = color_scales or {}
     full = full or (x.min()-2, y.min()-1, x.max()+2, y.max()+1)
     bounds = box(*full) if zoom is None else box(*full).union(box(*zoom)).envelope
     borders = country_borders(bounds)
@@ -141,9 +137,7 @@ def maps(out, cells, *, full=None, zoom=(-6.5, 41.0, 17.5, 56.25),
         norm = Normalize(-1, 1) if signed else None
         if len(values) and not signed:
             norm = Normalize(values.min(), values.quantile(.98))
-        cmap, norm = color_scales.get(key, ("RdBu_r" if signed else "viridis", norm))
-        if isinstance(norm, LogNorm):
-            values = values[values > 0]
+        cmap = "RdBu_r" if signed else "viridis"
         points = ax.scatter(x[values.index], y[values.index], c=values,
                             cmap=cmap, norm=norm,
                             s=6, linewidths=0)
@@ -155,7 +149,7 @@ def maps(out, cells, *, full=None, zoom=(-6.5, 41.0, 17.5, 56.25),
 
     folder = out / "metric_maps"
     folder.mkdir()
-    for key, label in metric_labels.items():
+    for key in METRICS:
         if zoom is None:
             fig, axes = plt.subplots(figsize=(9, 5), constrained_layout=True)
             points = draw(axes, key, full, "Full study area")
@@ -163,22 +157,21 @@ def maps(out, cells, *, full=None, zoom=(-6.5, 41.0, 17.5, 56.25),
             fig, axes = plt.subplots(1, 2, figsize=(12, 6), constrained_layout=True)
             draw(axes[0], key, full, "Full study area")
             points = draw(axes[1], key, zoom, zoom_title)
-        fig.colorbar(points, ax=axes, shrink=.7, label=label, extend="both")
-        fig.suptitle(label)
+        fig.colorbar(points, ax=axes, shrink=.7, label=key, extend="both")
+        fig.suptitle(key)
         save(fig, folder / f"{key}.png")
 
     fig, axes = plt.subplots(2, 2, figsize=(9, 8), constrained_layout=True)
-    for ax, key in zip(axes.flat, [coverage, "RMS_spread", "obs_SD", "prediction_SD"]):
-        fig.colorbar(draw(ax, key, full, statistic_labels.get(key, key)), ax=ax, shrink=.7)
+    for ax, key in zip(axes.flat, ["paired_months", "RMS_spread", "obs_SD", "prediction_SD"]):
+        fig.colorbar(draw(ax, key, full, key), ax=ax, shrink=.7)
     save(fig, out / "statistics_maps.png")
 
 
-def paired_plot(ax, obs, pred, score, pooled=False, period="month",
-                value_label="standardized anomaly"):
+def paired_plot(ax, obs, pred, score, pooled=False, value_label="standardized anomaly"):
     if len(obs):
         if pooled:
             density = ax.hexbin(obs, pred, gridsize=60, bins="log", mincnt=1)
-            ax.figure.colorbar(density, ax=ax, label=f"Cell-{period} count")
+            ax.figure.colorbar(density, ax=ax, label="Cell-month count")
         else:
             ax.scatter(obs, pred, s=10, alpha=.55, linewidths=0)
         lo, hi = min(obs.min(), pred.min()), max(obs.max(), pred.max())
@@ -195,9 +188,7 @@ def plot_members(ax, dates, members):
 
 
 def cell_figures(out, cells, dates, obs, pred, members, indices, *,
-                 metric_labels=None, value_label="standardized anomaly", location_map=None,
-                 series_label=None):
-    metric_labels = metric_labels or {key: key for key in METRICS}
+                 value_label="standardized anomaly", location_map=None, series_label=None):
     series_label = series_label or ("Std. anomaly" if value_label == "standardized anomaly" else value_label)
     ts = out / "timeseries"
     scatter = out / "cell_r2"
@@ -217,7 +208,7 @@ def cell_figures(out, cells, dates, obs, pred, members, indices, *,
         ax.plot(dates, pred[:, i], label="Ensemble mean", color="#ae4120", lw=1.4)
         ax.legend(loc="upper center", bbox_to_anchor=(.5, -.10), ncol=3, frameon=False)
         ax.set_ylabel(series_label)
-        ax.set_title("    ".join(f"{label} {number(row[key])}" for key, label in metric_labels.items()),
+        ax.set_title("    ".join(f"{key} {number(row[key])}" for key in METRICS),
                      fontsize=9)
         fig.suptitle(title)
         save(fig, ts / name, dpi=110)
@@ -234,52 +225,31 @@ def cell_figures(out, cells, dates, obs, pred, members, indices, *,
         save(fig, scatter / name, dpi=110)
 
 
-def scale_metric_axis(ax, direction, values, scale):
-    if scale == "log":
-        getattr(ax, f"set_{direction}scale")("log")
-    elif scale == "symlog":
-        getattr(ax, f"set_{direction}scale")("symlog", linthresh=1)
-        getattr(ax, f"set_{direction}lim")(min(-1, values.min()), 1)
-        getattr(ax, f"{direction}axis").get_major_locator().set_params(numticks=5)
-
-
-def figures(out, cells, periods, obs, pred, members, indices, *, period="month", map_options=None,
-            metric_labels=None, statistic_labels=None, value_label="standardized anomaly",
-            paired_filename="paired_anomalies.png", axis_scales=None, show_example_members=False,
-            scatter_minimums=None, location_map=None, series_label=None):
-    metric_labels = metric_labels or {key: key for key in METRICS}
-    statistic_labels = statistic_labels or {}
-    axis_scales = axis_scales or {}
+def figures(out, cells, periods, obs, pred, members, indices, *, map_options=None,
+            value_label="standardized anomaly", scatter_minimums=None, location_map=None,
+            series_label=None):
     scatter_minimums = scatter_minimums or {}
-    maps(out, cells, metric_labels=metric_labels, statistic_labels=statistic_labels,
-         **(map_options or {}))
+    maps(out, cells, **(map_options or {}))
     fig, axes = plt.subplots(2, 3, figsize=(11, 6), constrained_layout=True)
-    for ax, (key, label) in zip(axes.flat, metric_labels.items()):
+    for ax, key in zip(axes.flat, METRICS):
         v = np.sort(cells[key].dropna())
         fraction = np.arange(1, len(v)+1) / max(len(v), 1)
-        shown = v > 0 if axis_scales.get(key) == "log" else slice(None)
-        ax.step(v[shown], fraction[shown], where="post")
-        ax.set(xlabel=label, ylabel="Fraction of cells", ylim=(0, 1.02))
-        scale_metric_axis(ax, "x", cells[key], axis_scales.get(key))
-    for ax in axes.flat[len(metric_labels):]:
+        ax.step(v, fraction, where="post")
+        ax.set(xlabel=key, ylabel="Fraction of cells", ylim=(0, 1.02))
+    for ax in axes.flat[len(METRICS):]:
         ax.remove()
     save(fig, out / "metric_cdfs.png")
 
-    fig, axes = plt.subplots(len(metric_labels), len(STATS), figsize=(16, 14),
+    fig, axes = plt.subplots(len(METRICS), len(STATS), figsize=(16, 14),
                              constrained_layout=True, squeeze=False)
-    for row, (key, label) in zip(axes, metric_labels.items()):
+    for row, key in zip(axes, METRICS):
         for ax, stat in zip(row, STATS):
             pairs = cells[[stat, key]].dropna()
-            for column in (stat, key):
-                if axis_scales.get(column) == "log":
-                    pairs = pairs.loc[pairs[column] > 0]
             minimum = scatter_minimums.get(key)
             if minimum is not None:
                 pairs = pairs.loc[pairs[key] >= minimum]
             ax.scatter(pairs[stat], pairs[key], s=3, alpha=.35)
-            ax.set(xlabel=statistic_labels.get(stat, stat.replace("_", " ")), ylabel=label)
-            scale_metric_axis(ax, "x", cells[stat], axis_scales.get(stat))
-            scale_metric_axis(ax, "y", cells[key], axis_scales.get(key))
+            ax.set(xlabel=stat.replace("_", " "), ylabel=key)
             if minimum is not None:
                 ax.set_ylim(minimum, 1.02)
     save(fig, out / "statistics_vs_metrics.png")
@@ -288,9 +258,9 @@ def figures(out, cells, periods, obs, pred, members, indices, *, period="month",
     paired = np.isfinite(obs) & np.isfinite(pred)
     o, p = obs[paired], pred[paired]
     score = prediction_r2(o, p)
-    paired_plot(ax, o, p, score, pooled=True, period=period, value_label=value_label)
-    ax.set_title(f"All paired cell-{period}s")
-    save(fig, out / paired_filename)
+    paired_plot(ax, o, p, score, pooled=True, value_label=value_label)
+    ax.set_title("All paired cell-months")
+    save(fig, out / "paired_anomalies.png")
     print(f"Global R² = {number(score)}", flush=True)
 
     ranked = cells.RMSE.dropna().sort_values()
@@ -301,15 +271,13 @@ def figures(out, cells, periods, obs, pred, members, indices, *, period="month",
         i = ranked.index[round(q*(len(ranked)-1))]
         if location_map is not None:
             cell_location(ax.inset_axes([1.025, .05, .17, .85]), cells.loc[i], location_map)
-        if show_example_members:
-            plot_members(ax, dates, members[i])
         ax.plot(dates, obs[:, i], label="Observation", lw=1)
         ax.plot(dates, pred[:, i], label="Ensemble mean", lw=1)
-        ax.set(title=f"Cell {i} · {q:.0%} RMSE rank · {metric_labels['RMSE']} {ranked[i]:.2f}",
+        ax.set(title=f"Cell {i} · {q:.0%} RMSE rank · RMSE {ranked[i]:.2f}",
                ylabel=series_label)
-    axes[0].legend(ncol=3 if show_example_members else 2)
+    axes[0].legend(ncol=2)
     save(fig, out / "example_series.png")
     start = monotonic()
-    cell_figures(out, cells, dates, obs, pred, members, indices, metric_labels=metric_labels,
-                 value_label=value_label, location_map=location_map, series_label=series_label)
+    cell_figures(out, cells, dates, obs, pred, members, indices, value_label=value_label,
+                 location_map=location_map, series_label=series_label)
     print(f"Rendered both figures for {len(indices)} cells in {monotonic()-start:.1f} s", flush=True)

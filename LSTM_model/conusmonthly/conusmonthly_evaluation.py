@@ -62,8 +62,8 @@ def aggregate_predictions(prepared, predictions, dates, periods, starts, counts,
         daily = np.load(path, mmap_mode="r", allow_pickle=False)
         if (info["member"] != member or daily.shape != (len(dates), ncell)
                 or list(daily.shape) != info["shape"]
-                or Path(info["target_dates_file"]).resolve() != prepared / "target_dates.npy"
-                or Path(info["selected_pixels_file"]).resolve() != prepared / "selected_pixels.npy"):
+                or Path(info["target_dates_file"]).resolve() != (prepared / "target_dates.npy").resolve()
+                or Path(info["selected_pixels_file"]).resolve() != (prepared / "selected_pixels.npy").resolve()):
             raise ValueError(f"Prediction metadata does not match the prepared run: {path}")
         raw = np.add.reduceat(daily, starts, axis=0, dtype=float) / counts[:, None]
         if not np.isfinite(raw).all():
