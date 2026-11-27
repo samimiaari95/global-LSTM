@@ -36,6 +36,32 @@ def read_sites(path):
     return pd.read_csv(path, dtype={"site_id": str}).set_index("site_id", verify_integrity=True)
 
 
+def monthly_wtd(path, periods):
+    values = pd.read_csv(path, index_col="date", parse_dates=True)
+    values.index = values.index.to_period("M")
+    if not values.index.is_unique or not periods.isin(values.index).all():
+        raise ValueError(f"Selected observations do not cover the study months: {path}")
+    return values.loc[periods]
+
+
+def nearest_wells(wells, values):
+    """Select one well with defined monthly anomalies per assigned grid cell."""
+    data = values.reindex(columns=wells.index)
+    monthly = data.groupby(data.index.month)
+    eligible = np.isfinite(data).all(axis=0) & (monthly.max() > monthly.min()).all(axis=0)
+    candidates = wells.loc[eligible].copy()
+    coordinates = ["latitude", "longitude", "grid_latitude", "grid_longitude"]
+    if not np.isfinite(candidates[coordinates]).all().all():
+        raise ValueError("Eligible wells and grid centres must have finite coordinates")
+    lat, lon, grid_lat, grid_lon = np.deg2rad(candidates[coordinates].to_numpy().T)
+    a = np.sin((grid_lat - lat) / 2)**2 + np.cos(lat) * np.cos(grid_lat) * np.sin((grid_lon - lon) / 2)**2
+    # Match the spherical distance convention in the Europe ERA5-Land mapper.
+    candidates["well_distance_km"] = 2 * 6373.0 * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
+    candidates["candidate_well_count"] = candidates.groupby(["y", "x"])["y"].transform("size")
+    return (candidates.sort_values(["y", "x", "well_distance_km", "site_id"])
+            .drop_duplicates(["y", "x"]))
+
+
 def download(root):
     cache = root / "observations"
     cache.mkdir(parents=True, exist_ok=True)

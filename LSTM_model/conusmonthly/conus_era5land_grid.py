@@ -1,6 +1,7 @@
 """Put CONUS groundwater observations and static predictors on the native ERA5-Land grid."""
 
 import argparse
+import json
 import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor
@@ -13,7 +14,9 @@ from pyproj import Proj
 from LSTM_model.utils.era5land_arco import GROUPS, arco_headers, grid_indices, open_arco_group
 from LSTM_model.utils.file_io import save_csv, save_json
 from LSTM_model.conusmonthly.conus_inputs import CONUS2_SHAPE
-from LSTM_model.conusmonthly.conus_observations import MONTHLY_INPUTS, connect_hydrodata, read_sites
+from LSTM_model.conusmonthly.conus_observations import (
+    MONTHLY_END, MONTHLY_INPUTS, MONTHLY_START, connect_hydrodata, monthly_wtd, nearest_wells, read_sites,
+)
 from LSTM_model.model.config import get_root_dir
 
 
@@ -26,6 +29,7 @@ SOIL_PARAMETERS = {
 }
 SURFACE_FIELDS = (*SOIL_PARAMETERS, "sres")
 SOIL_CODES = range(1, 14)
+OBSERVATION_MAPPING = "Nearest eligible well to each assigned ERA5-Land centre"
 GEOLOGY_CODES = range(19, 29)
 CONUS2_ORIGIN = (-2208000.30881173, -1668999.65483222)
 CONUS2_PROJECTION = (
@@ -164,18 +168,28 @@ def assign_wells(wells, grid):
     return wells.assign(y=rows, x=cols, grid_latitude=latitude[rows], grid_longitude=signed_lon)
 
 
-def grid_wtd(wells, observations):
-    values = observations.loc[:, wells.index].T
-    means = values.groupby([wells.y, wells.x]).mean().T
-    means.index.name = "date"
-    counts = wells.groupby(["y", "x"]).size().rename("well_count")
-    return (means.stack(["y", "x"], future_stack=True).rename("wtd_m").reset_index()
-            .join(counts, on=["y", "x"]))
+def write_observations(output, wells, observations):
+    selected = nearest_wells(wells, observations)
+    if len(selected) != len(wells.drop_duplicates(["y", "x"])):
+        raise ValueError("At least one assigned observation cell has no eligible well")
+    cell_index = pd.MultiIndex.from_frame(selected[["y", "x"]])
+    values = observations.loc[:, selected.index].set_axis(cell_index, axis=1)
+    values.index = values.index.to_timestamp().rename("date")
+    metadata = selected[["y", "x", "well_distance_km", "candidate_well_count"]].reset_index()
+    gridded = (values.stack(["y", "x"], future_stack=True).rename("wtd_m").reset_index()
+               .merge(metadata, on=["y", "x"], validate="many_to_one").assign(well_count=1))
+    save_csv(selected, output / "selected_wells_by_cell.csv")
+    save_csv(gridded, output / "observations_gridded.csv", index=False)
+    return len(selected)
+
+
+def observation_months(path):
+    return monthly_wtd(path, pd.period_range(MONTHLY_START, MONTHLY_END, freq="M"))
 
 
 def build_grid(root, output, tcl):
     metadata = read_sites(root / "selected_stations.csv")
-    observations = pd.read_csv(root / "selected_wtd.csv", index_col="date")
+    observations = observation_months(root / "selected_wtd.csv")
     server, group_name, _ = GROUPS[0]
     grid = open_arco_group(server, group_name, arco_headers())
     wells = assign_wells(metadata, grid)
@@ -183,9 +197,8 @@ def build_grid(root, output, tcl):
               .rename(columns={"grid_latitude": "latitude", "grid_longitude": "longitude"})
               .sort_values(["y", "x"], ignore_index=True))
     output.mkdir(parents=True, exist_ok=True)
-    observation_file = "observations_gridded.csv"
     save_csv(wells, output / "well_era5land_cells.csv")
-    save_csv(grid_wtd(wells, observations), output / observation_file, index=False)
+    n_selected = write_observations(output, wells, observations)
 
     sampled = nearest_conus2_static(pixels, root / "static" / "conus2")
     usable = (
@@ -212,7 +225,9 @@ def build_grid(root, output, tcl):
     summary = {
         "grid": "native ERA5-Land 0.1 degree",
         "wells": len(wells), "observation_cells": len(pixels),
-        "gridded_observations_file": observation_file,
+        "gridded_observations_file": "observations_gridded.csv",
+        "observation_mapping": OBSERVATION_MAPPING,
+        "selected_observation_wells": n_selected,
         "wells_with_static": len(retained), "cells_with_static": len(static),
         "static_source": "HydroData conus2_domain nearest cell center in Lambert conformal projection",
         "soil_layer": 9, "soil_matching_parameters": list(SOIL_PARAMETERS),
@@ -225,13 +240,23 @@ def build_grid(root, output, tcl):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=["download-soil", "grid"])
+    parser.add_argument("stage", choices=["download-soil", "grid", "observations"])
     parser.add_argument("--root", type=Path, default=MONTHLY_INPUTS)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--soil-tcl", type=Path, default=TCL)
     args = parser.parse_args()
     if args.stage == "download-soil":
         download_surface_parameters(args.root)
+    elif args.stage == "observations":
+        output = args.output or args.root / "era5land_grid"
+        selected = write_observations(output, read_sites(output / "well_era5land_cells.csv"),
+                                      observation_months(output / "selected_wtd.csv"))
+        manifest = output / "gridding.json"
+        if manifest.is_file():
+            info = json.loads(manifest.read_text())
+            info.update(observation_mapping=OBSERVATION_MAPPING, selected_observation_wells=selected)
+            save_json(info, manifest)
+        print(f"Gridded observations using {selected} nearest wells in {output}")
     else:
         build_grid(args.root, args.output or args.root / "era5land_grid", args.soil_tcl)
 

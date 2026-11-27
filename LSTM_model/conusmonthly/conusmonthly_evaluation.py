@@ -9,7 +9,9 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from LSTM_model.conusmonthly.conus_observations import MONTHLY_END, MONTHLY_GRID, MONTHLY_START, read_sites
+from LSTM_model.conusmonthly.conus_observations import (
+    MONTHLY_END, MONTHLY_GRID, MONTHLY_START, monthly_wtd, nearest_wells, read_sites,
+)
 from LSTM_model.utils.observation_evaluation import (
     MEMBERS, METRICS, country_borders, figures, metrics, rank_histogram, save, spatial_axes,
 )
@@ -20,6 +22,14 @@ from shapely.geometry import box
 
 MONTHLY_OUTPUTS = Path("outputs/CONUSmonthly")
 MAP_EXTENT = (-126, 23, -65, 51)
+MAP_OPTIONS = {"full": MAP_EXTENT, "zoom": None, "full_title": ""}
+SCATTER_METRICS = ("RMSE", "Pearson_r", "NSE", "KGE")
+SCATTER_STATISTICS = {
+    "Ensemble_variance": r"$\overline{\mathrm{EV}}$",
+    "IQR": r"$\overline{\mathrm{IQR}}$",
+    "Pairwise_r": "Pairwise r",
+    "MAD": "MAD",
+}
 
 
 def anomalies(values, periods):
@@ -34,20 +44,28 @@ def anomalies(values, periods):
     return result
 
 
-def observed_cells(prepared, pixels, periods):
+def averaged_observed_cells(prepared, pixels, periods):
+    """Keep the original observation baseline for the coordinate sensitivity experiment."""
     stations = read_sites(prepared / "stations_with_static.csv")
-    values = pd.read_csv(prepared / "selected_wtd.csv", index_col="date", parse_dates=True)
-    values.index = values.index.to_period(periods.freq)
-    if not values.index.is_unique or not periods.isin(values.index).all():
-        raise ValueError("Selected observations do not cover the prediction periods")
+    block = monthly_wtd(prepared / "selected_wtd.csv", periods)
     pixel_index = pd.MultiIndex.from_arrays(pixels.T, names=["y", "x"])
     station_groups = stations.groupby(["y", "x"]).groups
-    block = values.loc[periods]
     raw = np.column_stack([block[station_groups[cell]].mean(axis=1, skipna=False)
                            for cell in pixel_index])
     if not np.isfinite(raw).all():
         raise ValueError("Selected observations contain a gap")
     return raw, np.array([len(station_groups[cell]) for cell in pixel_index])
+
+
+def observed_cells(prepared, pixels, periods):
+    stations = read_sites(prepared / "stations_with_static.csv")
+    values = monthly_wtd(prepared / "selected_wtd.csv", periods)
+    selected = nearest_wells(stations, values).reset_index().set_index(["y", "x"])
+    prediction_cells = pd.MultiIndex.from_arrays(pixels.T, names=["y", "x"])
+    if len(selected) != len(prediction_cells) or not prediction_cells.isin(selected.index).all():
+        raise ValueError("Nearest-well observations do not cover exactly the prepared prediction grid")
+    selected = selected.loc[prediction_cells]
+    return values.loc[:, selected.site_id].to_numpy(), selected
 
 
 def aggregate_predictions(prepared, predictions, dates, periods, starts, counts, ncell, scratch):
@@ -79,26 +97,25 @@ def aggregate_predictions(prepared, predictions, dates, periods, starts, counts,
 
 def observation_locations(output, prepared, pixels, location_map):
     mapping = prepared.parent / "well_era5land_cells.csv"
-    if not mapping.is_file():
-        mapping = prepared / "stations_with_static.csv"
-    wells = read_sites(mapping)
+    wells = read_sites(mapping if mapping.is_file() else prepared / "stations_with_static.csv")
     assigned = wells.drop_duplicates(["y", "x"])
     evaluated = pd.MultiIndex.from_arrays(pixels.T, names=["y", "x"])
+    valid = pd.MultiIndex.from_frame(assigned[["y", "x"]]).isin(evaluated)
     borders, extent = location_map
     fig, axes = plt.subplots(1, 2, figsize=(12, 5.5), constrained_layout=True)
-    panels = (
-        (wells, "longitude", "latitude", "Valid wells", "o"),
-        (assigned, "grid_longitude", "grid_latitude", "Assigned ERA5-Land cells", "s"),
-    )
-    for ax, (points, lon, lat, title, marker) in zip(axes, panels):
-        included = pd.MultiIndex.from_frame(points[["y", "x"]]).isin(evaluated)
+    for ax in axes:
         spatial_axes(ax, borders, extent)
-        ax.scatter(points.loc[included, lon], points.loc[included, lat], marker=marker,
-                   s=7, alpha=.7, linewidths=0, color="#165e91", label="Included in evaluation")
-        if not included.all():
-            ax.scatter(points.loc[~included, lon], points.loc[~included, lat], marker=marker,
-                       s=11, linewidths=0, color="#ae4120", label="Observation archive only")
-        ax.set(title=f"{title} ({len(points):,})", xlabel="Longitude (°E)", ylabel="Latitude (°N)")
+        ax.set(xlabel="Longitude (°E)", ylabel="Latitude (°N)")
+    axes[0].scatter(wells.longitude, wells.latitude, s=7, alpha=.7, linewidths=0, color="#165e91")
+    axes[0].set_title(f"Point observation wells ({len(wells):,})")
+    for mask, color, label in (
+        (valid, "#165e91", "Valid cells"),
+        (~valid, "#ae4120", "Invalid cells"),
+    ):
+        cells = assigned.loc[mask]
+        axes[1].scatter(cells.grid_longitude, cells.grid_latitude, marker="s",
+                        s=9, linewidths=0, color=color, label=f"{label} ({len(cells):,})")
+    axes[1].set_title(f"Assigned ERA5-Land cells ({len(assigned):,})")
     axes[1].legend(loc="lower left", markerscale=2, fontsize=9)
     save(fig, output / "well_locations_and_grid_cells.png")
 
@@ -124,10 +141,13 @@ def evaluate(prepared, predictions, output, plot_cells=None):
     indices = list(range(ncell)) if plot_cells is None else sorted(set(plot_cells))
     if any(i < 0 or i >= ncell for i in indices):
         raise ValueError("Plot cell IDs must index selected_pixels.npy")
-    observed, station_count = observed_cells(prepared, pixels, periods)
+    observed, selected = observed_cells(prepared, pixels, periods)
     obs = anomalies(observed, periods)
     cells = pd.DataFrame(dict(model_y=pixels[:, 0], model_x=pixels[:, 1],
-                              longitude=static[3], latitude=static[4], station_count=station_count))
+                              longitude=static[3], latitude=static[4], station_count=1,
+                              site_id=selected.site_id.to_numpy(),
+                              well_distance_km=selected.well_distance_km.to_numpy(),
+                              candidate_well_count=selected.candidate_well_count.to_numpy()))
     cells.index.name = "cell"
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=output.parent) as workspace:
@@ -144,7 +164,8 @@ def evaluate(prepared, predictions, output, plot_cells=None):
         dataset = xr.Dataset(coords={
             "time": periods.start_time, "cell": cells.index,
             **{name: ("cell", cells[name]) for name in
-               ["model_y", "model_x", "latitude", "longitude", "station_count"]},
+               ["model_y", "model_x", "latitude", "longitude", "station_count",
+                "site_id", "well_distance_km", "candidate_well_count"]},
         })
         for name, values in [
             ("observed_wtd", observed), ("ensemble_mean_native_wtd", raw),
@@ -155,14 +176,16 @@ def evaluate(prepared, predictions, output, plot_cells=None):
         dataset["observed_wtd"].attrs["units"] = "m"
         dataset["prediction_days"] = ("time", counts.astype(np.int32))
         dataset.attrs.update(cadence="monthly", members=MEMBERS,
+                             observation_mapping="Single nearest eligible well per assigned cell",
                              anomaly_baseline="Separate calendar-month z-scores, 2020–2024, ddof=0")
         dataset.to_netcdf(result / "evaluation_series.nc", engine="scipy")
         location_map = country_borders(box(*MAP_EXTENT)), MAP_EXTENT
         observation_locations(result, prepared, pixels, location_map)
         rank_histogram(result, obs.astype(members.dtype, copy=False), members)
         figures(result, cells, periods, obs, pred, members, indices,
-                map_options={"full": MAP_EXTENT, "zoom": None}, location_map=location_map,
-                value_label="WTD anomalies", series_label="WTD anomalies")
+                map_options=MAP_OPTIONS, location_map=location_map,
+                value_label="WTD anomalies", series_label="WTD anomalies",
+                scatter_metrics=SCATTER_METRICS, scatter_statistics=SCATTER_STATISTICS)
         del members
         result.rename(output)
     print(f"Saved {ncell} cells and {int(cells.paired_months.sum())} paired cell-months to {output}")
@@ -172,7 +195,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prepared", type=Path, default=MONTHLY_GRID / "prepared")
     parser.add_argument("--predictions", type=Path, default=MONTHLY_OUTPUTS / "predictions")
-    parser.add_argument("--output", type=Path, default=MONTHLY_OUTPUTS / "evaluation" / "run_2020_2024")
+    parser.add_argument("--output", type=Path,
+                        default=MONTHLY_OUTPUTS / "evaluation" / "run_2020_2024_nearest_well")
     parser.add_argument("--plot-cells", type=int, nargs="+")
     args = parser.parse_args(argv)
     evaluate(args.prepared, args.predictions, args.output, args.plot_cells)
