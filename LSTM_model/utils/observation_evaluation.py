@@ -124,7 +124,7 @@ def rank_histogram(out, obs, members):
 
 
 def maps(out, cells, *, full=None, zoom=(-6.5, 41.0, 17.5, 56.25),
-         zoom_title="England and western–central Europe"):
+         zoom_title="England and western–central Europe", full_title="Full study area"):
     x, y = cells.longitude, cells.latitude
     full = full or (x.min()-2, y.min()-1, x.max()+2, y.max()+1)
     bounds = box(*full) if zoom is None else box(*full).union(box(*zoom)).envelope
@@ -152,10 +152,10 @@ def maps(out, cells, *, full=None, zoom=(-6.5, 41.0, 17.5, 56.25),
     for key in METRICS:
         if zoom is None:
             fig, axes = plt.subplots(figsize=(9, 5), constrained_layout=True)
-            points = draw(axes, key, full, "Full study area")
+            points = draw(axes, key, full, full_title)
         else:
             fig, axes = plt.subplots(1, 2, figsize=(12, 6), constrained_layout=True)
-            draw(axes[0], key, full, "Full study area")
+            draw(axes[0], key, full, full_title)
             points = draw(axes[1], key, zoom, zoom_title)
         fig.colorbar(points, ax=axes, shrink=.7, label=key, extend="both")
         fig.suptitle(key)
@@ -225,10 +225,29 @@ def cell_figures(out, cells, dates, obs, pred, members, indices, *,
         save(fig, scatter / name, dpi=110)
 
 
+def statistics_vs_metrics(out, cells, *, metric_names=METRICS, statistic_labels=None,
+                          scatter_minimums=None):
+    scatter_minimums = scatter_minimums or {}
+    statistic_labels = statistic_labels or {stat: stat.replace("_", " ") for stat in STATS}
+    fig, axes = plt.subplots(len(metric_names), len(statistic_labels),
+                             figsize=(3.2 * len(statistic_labels), 2.8 * len(metric_names)),
+                             constrained_layout=True, squeeze=False)
+    for row, key in zip(axes, metric_names):
+        for ax, (stat, label) in zip(row, statistic_labels.items()):
+            pairs = cells[[stat, key]].dropna()
+            minimum = scatter_minimums.get(key)
+            if minimum is not None:
+                pairs = pairs.loc[pairs[key] >= minimum]
+            ax.scatter(pairs[stat], pairs[key], s=3, alpha=.35)
+            ax.set(xlabel=label, ylabel=key)
+            if minimum is not None:
+                ax.set_ylim(minimum, 1.02)
+    save(fig, out / "statistics_vs_metrics.png")
+
+
 def figures(out, cells, periods, obs, pred, members, indices, *, map_options=None,
             value_label="standardized anomaly", scatter_minimums=None, location_map=None,
-            series_label=None):
-    scatter_minimums = scatter_minimums or {}
+            series_label=None, scatter_metrics=METRICS, scatter_statistics=None):
     maps(out, cells, **(map_options or {}))
     fig, axes = plt.subplots(2, 3, figsize=(11, 6), constrained_layout=True)
     for ax, key in zip(axes.flat, METRICS):
@@ -240,19 +259,8 @@ def figures(out, cells, periods, obs, pred, members, indices, *, map_options=Non
         ax.remove()
     save(fig, out / "metric_cdfs.png")
 
-    fig, axes = plt.subplots(len(METRICS), len(STATS), figsize=(16, 14),
-                             constrained_layout=True, squeeze=False)
-    for row, key in zip(axes, METRICS):
-        for ax, stat in zip(row, STATS):
-            pairs = cells[[stat, key]].dropna()
-            minimum = scatter_minimums.get(key)
-            if minimum is not None:
-                pairs = pairs.loc[pairs[key] >= minimum]
-            ax.scatter(pairs[stat], pairs[key], s=3, alpha=.35)
-            ax.set(xlabel=stat.replace("_", " "), ylabel=key)
-            if minimum is not None:
-                ax.set_ylim(minimum, 1.02)
-    save(fig, out / "statistics_vs_metrics.png")
+    statistics_vs_metrics(out, cells, metric_names=scatter_metrics, statistic_labels=scatter_statistics,
+                          scatter_minimums=scatter_minimums)
 
     fig, ax = plt.subplots(figsize=(6, 5), constrained_layout=True)
     paired = np.isfinite(obs) & np.isfinite(pred)

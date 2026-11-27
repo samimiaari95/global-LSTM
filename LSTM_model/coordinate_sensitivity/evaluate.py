@@ -104,7 +104,8 @@ def plot_series(output, dataset, table):
     ranks = np.rint(np.array([.10, .50, .90]) * (len(ranking) - 1)).astype(int)
     categories = ["Low", "Moderate", "High"]
     cells = ranking.index[ranks].to_numpy()
-    selected = table.loc["A3"].loc[cells, ["y", "x", "longitude", "latitude", "prediction_RMSE"]].copy()
+    columns = ["y", "x", "longitude", "latitude", "site_id", "well_distance_km", "prediction_RMSE"]
+    selected = table.loc["A3"].loc[cells, columns].copy()
     selected.insert(0, "sensitivity", categories)
     selected.insert(1, "target_quantile", [.10, .50, .90])
     selected.to_csv(output / "representative_locations.csv")
@@ -113,7 +114,7 @@ def plot_series(output, dataset, table):
         data = dataset.sel(cell=cell)
         mask = data.evaluation_mask.astype(bool)
         ax.plot(data.time, data.observed_anomaly.where(mask), color=".45",
-                linestyle="--", label="NWIS")
+                linestyle="--", label="Nearest NWIS well")
         for scenario, color in zip(SCENARIOS, COLORS, strict=True):
             prediction = data.ensemble_anomaly.sel(scenario=scenario)
             ax.plot(data.time, prediction.where(mask), color=color,
@@ -131,7 +132,7 @@ def write_results(path, summary, common):
     lines = [
         "# CONUS coordinate sensitivity results", "",
         f"Evaluation used {common.sum():,} common cell-months at "
-        f"{common.any(axis=0).sum():,} cells.", "",
+        f"{common.any(axis=0).sum():,} cells. Each cell uses the nearest eligible NWIS well.", "",
         "| Scenario | Quantity | Cells | Median | Q25 | Q75 | IQR |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
@@ -178,11 +179,15 @@ def evaluate(run):
     periods = dates[starts].to_period("M")
     pixels = np.load(prepared / "selected_pixels.npy", allow_pickle=False)
     static = np.load(prepared / STATIC, allow_pickle=False)
-    observed, wells = observed_cells(prepared, pixels, periods)
+    observed, selected_wells = observed_cells(prepared, pixels, periods)
     obs = anomalies(observed, periods)
-    locations = pd.DataFrame(dict(y=pixels[:, 0], x=pixels[:, 1], well_count=wells,
-                                  longitude=static[static_row("longitude")],
-                                  latitude=static[static_row("latitude")]))
+    locations = pd.DataFrame(dict(
+        y=pixels[:, 0], x=pixels[:, 1], well_count=1,
+        longitude=static[static_row("longitude")], latitude=static[static_row("latitude")],
+        site_id=selected_wells.site_id.to_numpy(),
+        well_distance_km=selected_wells.well_distance_km.to_numpy(),
+        candidate_well_count=selected_wells.candidate_well_count.to_numpy(),
+    ))
     locations.index.name = "cell"
     with TemporaryDirectory(dir=run, prefix=".evaluate-") as scratch:
         workspace = Path(scratch)
@@ -230,6 +235,7 @@ def evaluate(run):
             coords={"time": periods.start_time, "scenario": list(SCENARIOS), "cell": locations.index,
                     **{name: ("cell", locations[name].to_numpy()) for name in locations}},
             attrs={"members": len(manifest["models"]),
+                   "observation_mapping": "Single nearest eligible well per assigned cell",
                    "anomaly_baseline": "Separate calendar-month z-scores, 2020–2024, ddof=0",
                    "evaluation_mask": "Finite observed anomalies and finite ensemble anomalies in all scenarios"},
         )

@@ -45,7 +45,7 @@ def anomalies(values, periods):
 
 
 def averaged_observed_cells(prepared, pixels, periods):
-    """Keep the original observation baseline for the coordinate sensitivity experiment."""
+    """Reproduce the legacy averaged-well observation reference."""
     stations = read_sites(prepared / "stations_with_static.csv")
     block = monthly_wtd(prepared / "selected_wtd.csv", periods)
     pixel_index = pd.MultiIndex.from_arrays(pixels.T, names=["y", "x"])
