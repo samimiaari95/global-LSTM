@@ -231,7 +231,7 @@ def finalize_prediction(
             with temporary_metadata_path.open("w", encoding="utf-8") as metadata_file:
                 json.dump(metadata, metadata_file, indent=2)
             if staged_directory:
-                # Publish the native-grid array and metadata together.
+                # Publish the array and metadata together.
                 if prediction_path.parent.exists():
                     raise FileExistsError(prediction_path.parent)
                 temporary_path.parent.rename(prediction_path.parent)
@@ -309,7 +309,7 @@ def run_prediction(
         prediction_path = output_directory / f"member_{args.member:03d}" / "daily_wtd.npy"
     else:
         prediction_path = ENSEMBLE_PREDICTION_DIRECTORY / f"400px_member_{args.member}" / OUTPUT_FILENAME
-    if native_europe:
+    if native_europe or getattr(args, "atomic_member_output", False):
         attempt = [uuid4().hex if rank == 0 else None]
         torch.distributed.broadcast_object_list(attempt, src=0)
         stage = prediction_path.parent.with_name(f".member_{args.member:03d}.{attempt[0]}.partial")
@@ -458,6 +458,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--output-directory", type=Path,
                         help="Write daily WTD arrays and metadata in per-member subdirectories here.")
+    parser.add_argument("--atomic-member-output", action="store_true",
+                        help="Publish each member's array and metadata together.")
     return parser
 
 
